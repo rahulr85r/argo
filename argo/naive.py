@@ -6,12 +6,24 @@ entitlement-aware path replaces this in W3.
 """
 
 from argo.config import settings
-from argo.db.queries import get_all_accounts_with_owners, get_all_transactions, get_user
+from argo.db.queries import (
+    get_all_accounts_with_owners,
+    get_all_transactions,
+    get_all_users,
+    get_user,
+)
 from argo.llm import call_chat_model
 
 
 def _money(cents: int) -> str:
     return f"${cents / 100:,.2f}"
+
+
+def _render_users(users: list[dict]) -> str:
+    lines = ["=== ALL CUSTOMERS ==="]
+    for u in users:
+        lines.append(f"- id={u['id']} | name: {u['display_name']} | email: {u['email']}")
+    return "\n".join(lines)
 
 
 def _render_accounts(accounts: list[dict]) -> str:
@@ -45,6 +57,8 @@ SYSTEM_TEMPLATE = """You are a customer-service assistant for Argo Bank, helping
 
 You have access to Argo Bank's full customer dataset below. Use it to answer the customer's questions naturally and helpfully. Provide specific numbers, dates, and names when they help the customer.
 
+{users_block}
+
 {accounts_block}
 
 {transactions_block}
@@ -55,11 +69,13 @@ def build_naive_system_prompt(user_id: str) -> str:
     user = get_user(user_id)
     if user is None:
         raise ValueError(f"unknown user_id: {user_id}")
+    users = get_all_users()
     accounts = get_all_accounts_with_owners()
     txs = get_all_transactions()
     return SYSTEM_TEMPLATE.format(
         user_name=user["display_name"],
         user_id=user_id,
+        users_block=_render_users(users),
         accounts_block=_render_accounts(accounts),
         transactions_block=_render_transactions(txs),
     )
