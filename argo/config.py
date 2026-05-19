@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     postgres_user: str = "argo"
     postgres_password: str = "argo"
 
-    chat_model: str = "anthropic/claude-sonnet-4-5"
+    chat_model: str = "anthropic/claude-haiku-4-5"
     judge_model: str = "anthropic/claude-haiku-4-5"
 
     @property
