@@ -1,7 +1,18 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-app = FastAPI(title="Argo", version="0.0.1")
+from argo.db.bootstrap import init_db
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    yield
+
+
+app = FastAPI(title="Argo", version="0.0.1", lifespan=lifespan)
 
 
 @app.get("/health")
