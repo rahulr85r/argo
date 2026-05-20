@@ -1,0 +1,38 @@
+# Local virtual env — rebuilt from uv.lock inside the image
+.venv
+venv
+
+# Git metadata
+.git
+.gitignore
+
+# Local dev journal + scoring artifacts (also .gitignored)
+TASKS.md
+runs/
+
+# Eval methodology + labels are runtime fixtures — keep them
+# (scripts/ exercises them; argo/ may load eval/labeled_claims.json
+# in dev workflows but the gateway itself doesn't need it).
+# Skipping scripts/ + tests/ + eval/ from the image keeps it lean.
+scripts
+tests
+eval
+
+# Bytecode and caches
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.ruff_cache
+.mypy_cache
+
+# Editor / OS noise
+.DS_Store
+.idea
+.vscode
+.claude
+
+# Secrets — never bake into the image; passed in via env at runtime
+.env
+.env.local

@@ -16,5 +16,33 @@ services:
       timeout: 5s
       retries: 5
 
+  gateway:
+    build: .
+    container_name: argo-gateway
+    ports:
+      - "8000:8000"
+    environment:
+      # Postgres connection — talks to the sibling service by name.
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: argo
+      POSTGRES_USER: argo
+      POSTGRES_PASSWORD: argo
+      # Models (overridable via .env).
+      CHAT_MODEL: ${CHAT_MODEL:-anthropic/claude-haiku-4-5}
+      JUDGE_MODEL: ${JUDGE_MODEL:-anthropic/claude-haiku-4-5}
+      # Anthropic key MUST be set in .env (or the host shell). Compose
+      # passes the value through; the image never contains it.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8000/health\", timeout=2)'"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+
 volumes:
   argo_pg:
