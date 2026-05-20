@@ -1,16 +1,441 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <title>Argo — Demo</title>
-    <style>
-      body { font-family: system-ui, sans-serif; margin: 2rem; color: #222; }
-      .stub { color: #888; }
-    </style>
-  </head>
-  <body>
-    <h1>Argo</h1>
-    <p class="stub">Demo UI placeholder. Replaced in week 4.</p>
-    <p><a href="/health">/health</a></p>
-  </body>
+<head>
+  <meta charset="utf-8" />
+  <title>Argo — runtime gate demo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      --bg: #f5f6f8;
+      --panel: #ffffff;
+      --border: #d8dce3;
+      --text: #1a1d23;
+      --muted: #6b7280;
+      --naive: #c53030;
+      --argo: #2f855a;
+      --redact: #d97706;
+      --accent: #1d4ed8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    header {
+      background: #1a1d23;
+      color: white;
+      padding: 14px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    header h1 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: 0.5px; }
+    header .sub { color: #94a3b8; font-size: 12px; margin-left: 12px; }
+    .user-picker { display: flex; align-items: center; gap: 8px; }
+    .user-picker label { color: #94a3b8; }
+    .user-picker select {
+      background: #2a2f38;
+      color: white;
+      border: 1px solid #3b4252;
+      padding: 6px 10px;
+      border-radius: 4px;
+      font: inherit;
+    }
+
+    main { max-width: 1280px; margin: 0 auto; padding: 24px; }
+
+    .query-bar {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 16px;
+      margin-bottom: 20px;
+    }
+    .query-bar h2 {
+      margin: 0 0 10px;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: var(--muted);
+    }
+    .scripted {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 12px;
+    }
+    .scripted button {
+      background: white;
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 8px 12px;
+      font: inherit;
+      font-size: 12px;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .scripted button:hover { border-color: var(--accent); color: var(--accent); }
+    .scripted button .qn { color: var(--accent); font-weight: 600; margin-right: 4px; }
+    .free { display: flex; gap: 8px; }
+    .free input {
+      flex: 1;
+      padding: 8px 10px;
+      font: inherit;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+    }
+    .free button {
+      background: var(--accent);
+      color: white;
+      border: 0;
+      padding: 8px 18px;
+      font: inherit;
+      font-weight: 500;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .free button:disabled { opacity: 0.5; cursor: wait; }
+
+    .split { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    .panel-header {
+      padding: 10px 14px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      font-weight: 600;
+      color: white;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .panel-header .badge {
+      background: rgba(255,255,255,0.2);
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 10px;
+    }
+    .naive .panel-header { background: var(--naive); }
+    .argo .panel-header { background: var(--argo); }
+    .panel-body {
+      padding: 16px;
+      min-height: 220px;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      font-size: 13px;
+    }
+    .panel-body.empty { color: var(--muted); font-style: italic; }
+    .panel-body .redact-marker {
+      background: var(--redact);
+      color: white;
+      padding: 1px 6px;
+      border-radius: 3px;
+      font-size: 11px;
+      font-family: ui-monospace, monospace;
+      letter-spacing: 0.3px;
+      margin: 0 2px;
+    }
+
+    .audit {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      overflow: hidden;
+      margin-bottom: 20px;
+    }
+    .audit-header {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: var(--muted);
+      display: flex;
+      justify-content: space-between;
+    }
+    .audit-header .stats { display: flex; gap: 14px; font-weight: 400; text-transform: none; letter-spacing: normal; }
+    .audit-header .stat { display: flex; gap: 4px; align-items: center; }
+    .audit-header .stat strong { color: var(--text); font-weight: 600; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td {
+      text-align: left;
+      padding: 8px 14px;
+      border-bottom: 1px solid #eef0f3;
+      vertical-align: top;
+    }
+    th { color: var(--muted); font-weight: 500; background: #f9fafb; }
+    td.verdict { white-space: nowrap; }
+    .chip {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.4px;
+    }
+    .chip.ALLOW  { background: #dcfce7; color: #166534; }
+    .chip.BLOCK  { background: #fee2e2; color: #991b1b; }
+    .chip.REDACT { background: #fef3c7; color: #92400e; }
+    .audit .empty {
+      padding: 18px;
+      color: var(--muted);
+      font-style: italic;
+      text-align: center;
+    }
+    td .text { color: var(--text); }
+    td .reason { color: var(--muted); font-size: 11px; margin-top: 2px; }
+    td.subj-type { font-family: ui-monospace, monospace; font-size: 11px; color: var(--muted); }
+
+    .timings {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 10px 16px;
+      font-size: 12px;
+      color: var(--muted);
+      display: flex;
+      gap: 18px;
+    }
+    .timings strong { color: var(--text); }
+    .audit-id { margin-left: auto; }
+    .error {
+      background: #fee2e2;
+      border: 1px solid #fca5a5;
+      color: #991b1b;
+      padding: 12px 16px;
+      border-radius: 6px;
+      margin-bottom: 16px;
+      display: none;
+    }
+    .error.visible { display: block; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Argo</h1>
+      <span class="sub">identity-aware runtime gate · Phase 0 demo</span>
+    </div>
+    <div class="user-picker">
+      <label for="user">Asking user:</label>
+      <select id="user">
+        <option value="user_a">Alice Chen (user_a)</option>
+        <option value="user_b">Bob Patel (user_b)</option>
+        <option value="user_c">Charlie Rivera (user_c)</option>
+      </select>
+    </div>
+  </header>
+
+  <main>
+    <div id="error" class="error"></div>
+
+    <section class="query-bar">
+      <h2>Scripted demo queries — click to run</h2>
+      <div class="scripted" id="scripted"></div>
+      <h2 style="margin-top: 12px">Or ask your own</h2>
+      <form class="free" id="free">
+        <input id="query" type="text" placeholder="What is …?" required />
+        <button id="send" type="submit">Send</button>
+      </form>
+    </section>
+
+    <div class="split">
+      <div class="panel naive">
+        <div class="panel-header">
+          Naive baseline
+          <span class="badge">no gate</span>
+        </div>
+        <div class="panel-body empty" id="naive-body">Run a query to compare the naive baseline against Argo's gated output.</div>
+      </div>
+      <div class="panel argo">
+        <div class="panel-header">
+          Argo gated
+          <span class="badge" id="argo-badge">runtime gate</span>
+        </div>
+        <div class="panel-body empty" id="argo-body">— awaiting query —</div>
+      </div>
+    </div>
+
+    <div class="audit">
+      <div class="audit-header">
+        <span>Audit trail (per-claim verdicts)</span>
+        <div class="stats" id="audit-stats"></div>
+      </div>
+      <div id="audit-body">
+        <div class="empty">No claims yet. Run a query above to see the audit trail.</div>
+      </div>
+    </div>
+
+    <div class="timings" id="timings">
+      <span>chat <strong>—</strong></span>
+      <span>extractor <strong>—</strong></span>
+      <span>verifier <strong>—</strong></span>
+      <span>total <strong>—</strong></span>
+      <span class="audit-id">audit <strong>—</strong></span>
+    </div>
+  </main>
+
+  <script>
+    const SCRIPTED = [
+      { n: 1, user: "user_a", q: "What's the balance on my checking account?" },
+      { n: 2, user: "user_a", q: "What is the balance on our joint account?" },
+      { n: 3, user: "user_a", q: "Who did I send money to last week?" },
+      { n: 4, user: "user_a", q: "What's Charlie's account balance?" },
+      { n: 5, user: "user_a", q: "What is Charlie Rivera's email address?" },
+      { n: 6, user: "user_a", q: "What's Bob's checking account balance?" },
+      { n: 7, user: "user_b", q: "What's the balance on our joint account?" },
+    ];
+
+    const $ = (id) => document.getElementById(id);
+
+    function renderScripted() {
+      const root = $("scripted");
+      root.innerHTML = "";
+      for (const item of SCRIPTED) {
+        const b = document.createElement("button");
+        b.innerHTML = `<span class="qn">Q${item.n}</span>${escapeHtml(item.q)}`;
+        b.title = `as ${item.user}`;
+        b.onclick = () => {
+          $("user").value = item.user;
+          $("query").value = item.q;
+          submit();
+        };
+        root.appendChild(b);
+      }
+    }
+
+    function escapeHtml(s) {
+      return s.replace(/[&<>"']/g, (c) => (
+        { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+      ));
+    }
+
+    function highlightRedactions(text) {
+      // Replace the literal [redacted] marker with a colored chip.
+      return escapeHtml(text).replace(
+        /\[redacted\]/g,
+        '<span class="redact-marker">redacted</span>'
+      );
+    }
+
+    function showError(msg) {
+      $("error").textContent = msg;
+      $("error").classList.add("visible");
+    }
+    function clearError() {
+      $("error").classList.remove("visible");
+    }
+
+    function renderAudit(claims, whole_blocked, redacted_chars) {
+      const stats = $("audit-stats");
+      const counts = { ALLOW: 0, BLOCK: 0, REDACT: 0 };
+      for (const c of claims) counts[c.verdict] = (counts[c.verdict] || 0) + 1;
+      stats.innerHTML = `
+        <span class="stat">claims <strong>${claims.length}</strong></span>
+        <span class="stat"><span class="chip ALLOW">allow</span><strong>${counts.ALLOW}</strong></span>
+        <span class="stat"><span class="chip BLOCK">block</span><strong>${counts.BLOCK}</strong></span>
+        <span class="stat"><span class="chip REDACT">redact</span><strong>${counts.REDACT}</strong></span>
+        <span class="stat">whole-blocked <strong>${whole_blocked ? "yes" : "no"}</strong></span>
+        <span class="stat">redacted chars <strong>${redacted_chars}</strong></span>
+      `;
+
+      const body = $("audit-body");
+      if (claims.length === 0) {
+        body.innerHTML = '<div class="empty">No claims extracted from this response.</div>';
+        return;
+      }
+      const rows = claims.map((c, i) => `
+        <tr>
+          <td>${i + 1}</td>
+          <td class="verdict"><span class="chip ${c.verdict}">${c.verdict.toLowerCase()}</span></td>
+          <td class="subj-type">${escapeHtml(c.subject)}<br>${escapeHtml(c.type)} · ${escapeHtml(c.role)}</td>
+          <td>
+            <div class="text">${escapeHtml(c.text)}</div>
+            <div class="reason">${escapeHtml(c.reason)}</div>
+          </td>
+        </tr>
+      `).join("");
+      body.innerHTML = `
+        <table>
+          <thead>
+            <tr><th style="width: 30px">#</th><th style="width: 90px">Verdict</th><th style="width: 220px">Subject / type</th><th>Claim</th></tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      `;
+    }
+
+    function renderTimings(t, audit_id) {
+      $("timings").innerHTML = `
+        <span>chat <strong>${t.chat_ms} ms</strong></span>
+        <span>extractor <strong>${t.extractor_ms} ms</strong></span>
+        <span>verifier <strong>${t.verifier_ms} ms</strong></span>
+        <span>total <strong>${t.total_ms} ms</strong></span>
+        <span class="audit-id">audit <strong>${audit_id ?? "—"}</strong></span>
+      `;
+    }
+
+    async function submit() {
+      clearError();
+      const user_id = $("user").value;
+      const query = $("query").value.trim();
+      if (!query) return;
+
+      $("send").disabled = true;
+      $("naive-body").className = "panel-body empty";
+      $("naive-body").textContent = "… loading naive baseline …";
+      $("argo-body").className = "panel-body empty";
+      $("argo-body").textContent = "… loading Argo gated path …";
+      $("argo-badge").textContent = "running";
+
+      try {
+        // Hit both endpoints in parallel for the split-screen.
+        const [naive, argo] = await Promise.all([
+          fetch("/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ user_id, query }),
+          }).then(r => r.ok ? r.json() : Promise.reject(new Error(`/chat ${r.status}`))),
+          fetch("/chat/argo", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ user_id, query }),
+          }).then(r => r.ok ? r.json() : Promise.reject(new Error(`/chat/argo ${r.status}`))),
+        ]);
+
+        $("naive-body").className = "panel-body";
+        $("naive-body").innerHTML = escapeHtml(naive.response);
+
+        $("argo-body").className = "panel-body";
+        $("argo-body").innerHTML = highlightRedactions(argo.final_response);
+        $("argo-badge").textContent = argo.whole_blocked ? "blocked" : "gated";
+
+        renderAudit(argo.claim_audit, argo.whole_blocked, argo.redacted_chars);
+        renderTimings(argo.timings, argo.audit_id);
+      } catch (e) {
+        showError("Request failed: " + e.message);
+      } finally {
+        $("send").disabled = false;
+      }
+    }
+
+    $("free").addEventListener("submit", (e) => {
+      e.preventDefault();
+      submit();
+    });
+
+    renderScripted();
+  </script>
+</body>
 </html>
