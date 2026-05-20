@@ -46,3 +46,26 @@ def get_all_transactions() -> list[dict]:
             """
         )
         return cur.fetchall()
+
+
+def get_user_transactions(user_id: str) -> list[dict]:
+    """Transactions on every account the user owns (individual + joint).
+
+    Used by the source-span verifier to confirm a transaction claim has any
+    origin in the asking user's actually-visible data.
+    """
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT t.id, t.account_id, a.display_name AS account_display,
+                   t.amount_cents, t.direction, t.counterparty_name,
+                   t.counterparty_user_id, t.memo, t.ts
+            FROM transactions t
+            JOIN accounts a ON a.id = t.account_id
+            JOIN account_owners ao ON ao.account_id = t.account_id
+            WHERE ao.user_id = %s
+            ORDER BY t.ts ASC, t.id ASC
+            """,
+            (user_id,),
+        )
+        return cur.fetchall()

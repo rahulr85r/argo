@@ -27,8 +27,9 @@ from argo.claims import Claim, ClaimType
 
 class ClaimVerdict(StrEnum):
     ALLOW = "ALLOW"
-    BLOCK = "BLOCK"
-    NEEDS_SOURCE_CHECK = "NEEDS_SOURCE_CHECK"
+    BLOCK = "BLOCK"                       # entitlement-denied
+    REDACT = "REDACT"                     # source-span verifier rejected the claim (hallucination / misattribution)
+    NEEDS_SOURCE_CHECK = "NEEDS_SOURCE_CHECK"  # interim verdict from check_claim() — verifier resolves to ALLOW or REDACT
 
 
 @dataclass(frozen=True)
