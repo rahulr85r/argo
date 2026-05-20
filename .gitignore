@@ -18,3 +18,10 @@ htmlcov/
 .vscode/
 .claude/
 *.log
+
+# Local dev journal — not part of the tool
+TASKS.md
+
+# Score / run artifacts produced by scripts/run_extractor_eval.py and
+# scripts/run_verifier_smoke.py. Regenerable; not part of the shipped tool.
+runs/
