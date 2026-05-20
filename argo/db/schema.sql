@@ -37,3 +37,25 @@ CREATE TABLE IF NOT EXISTS transactions (
 CREATE INDEX IF NOT EXISTS idx_account_owners_user ON account_owners(user_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_account ON transactions(account_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_ts ON transactions(ts DESC);
+
+
+-- Audit trail: one row per /chat/argo call. claim_audit jsonb holds an array
+-- of {text, subject, type, role, source_span, verdict, reason} — the full
+-- structured rationale the regulator-readable demo panel surfaces.
+CREATE TABLE IF NOT EXISTS audit_events (
+  id                   bigserial PRIMARY KEY,
+  ts                   timestamptz NOT NULL DEFAULT now(),
+  user_id              text NOT NULL REFERENCES users(id),
+  query                text NOT NULL,
+  raw_response         text NOT NULL,
+  final_response       text NOT NULL,
+  whole_blocked        boolean NOT NULL,
+  redacted_chars       int NOT NULL DEFAULT 0,
+  claim_audit          jsonb NOT NULL DEFAULT '[]'::jsonb,
+  chat_model           text NOT NULL,
+  chat_latency_ms      int NOT NULL DEFAULT 0,
+  extractor_latency_ms int NOT NULL DEFAULT 0,
+  verifier_latency_ms  int NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_events_user_ts ON audit_events(user_id, ts DESC);
