@@ -58,33 +58,38 @@ def get_account_ids_for_user(user_id: str) -> list[str]:
         return [r["account_id"] for r in cur.fetchall()]
 
 
-def get_counterparty_user_ids_for_user(user_id: str) -> list[str]:
-    """Distinct user_ids the asking user has a transactional link to.
-
-    Two paths qualify:
-      (a) any tx on an account the user owns naming the other party as
-          counterparty_user_id,
-      (b) anyone else who co-owns an account the user is on (joint-account
-          co-owners — even before they exchange any tx, the co-ownership
-          itself is a visibility-creating relationship).
+def get_recent_payment_counterparties(user_id: str, lookback_days: int) -> list[str]:
+    """Rule `recent_payment`: distinct user_ids appearing as counterparty on
+    a tx posted to any of the asking user's accounts in the lookback window.
     """
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
             """
-            SELECT DISTINCT cp_user FROM (
-                SELECT t.counterparty_user_id AS cp_user
-                FROM transactions t
-                JOIN account_owners ao ON ao.account_id = t.account_id
-                WHERE ao.user_id = %(uid)s
-                  AND t.counterparty_user_id IS NOT NULL
-                  AND t.counterparty_user_id <> %(uid)s
-                UNION
-                SELECT other.user_id AS cp_user
-                FROM account_owners mine
-                JOIN account_owners other USING (account_id)
-                WHERE mine.user_id = %(uid)s
-                  AND other.user_id <> %(uid)s
-            ) cps
+            SELECT DISTINCT t.counterparty_user_id AS cp_user
+            FROM transactions t
+            JOIN account_owners ao ON ao.account_id = t.account_id
+            WHERE ao.user_id = %(uid)s
+              AND t.counterparty_user_id IS NOT NULL
+              AND t.counterparty_user_id <> %(uid)s
+              AND t.ts >= NOW() - make_interval(days => %(days)s)
+            """,
+            {"uid": user_id, "days": lookback_days},
+        )
+        return [r["cp_user"] for r in cur.fetchall()]
+
+
+def get_joint_account_co_owners(user_id: str) -> list[str]:
+    """Rule `joint_account_co_owner`: other users who co-own any account
+    the asking user is on. Independent of transaction activity.
+    """
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT DISTINCT other.user_id AS cp_user
+            FROM account_owners mine
+            JOIN account_owners other USING (account_id)
+            WHERE mine.user_id = %(uid)s
+              AND other.user_id <> %(uid)s
             """,
             {"uid": user_id},
         )

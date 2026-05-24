@@ -423,31 +423,63 @@ def _build_transactions() -> list[TxRow]:
 _TX_DATA = sorted(_build_transactions(), key=lambda r: (r[6], r[0]))
 
 
-# ----- Entitlement helpers (used by entitlements.py) ---------------------
+# ----- Policy-rule evaluators against the in-memory seed -----------------
+#
+# The SeedDerivedAdapter (test-only) applies the same POLICY rules as
+# production, but against the lists above instead of Postgres. The
+# reference "now" is pinned to one day past the latest tx in the seed so
+# rule evaluation is independent of wall-clock — tests run in 2026 or
+# 2030 see the same counterparty graph.
 
-def counterparties_for(user_id: str) -> set[str]:
-    """user_ids the asking user has a transactional link to.
 
-    Two paths qualify: (a) any tx on an account they own naming the other
-    user as counterparty_user_id, and (b) anyone else with ownership of a
-    joint account they're on.
-    """
-    owned_accts = {acct for (acct, uid) in OWNERSHIPS if uid == user_id}
-    cps: set[str] = set()
+def _seed_reference_now() -> datetime:
+    latest = max(_ts(ts) for (_a, _c, _d, _cpn, _cpu, _m, ts) in _TX_DATA)
+    return latest + timedelta(days=1)
 
-    for (acct, _cents, _dir, _cp_name, cp_user, _memo, _ts) in _TX_DATA:
-        if acct in owned_accts and cp_user is not None and cp_user != user_id:
-            cps.add(cp_user)
 
-    for (acct, uid) in OWNERSHIPS:
-        if acct in owned_accts and uid != user_id:
-            cps.add(uid)
-
-    return cps
+_SEED_NOW: datetime = _seed_reference_now()
 
 
 def accounts_for(user_id: str) -> set[str]:
     return {acct for (acct, uid) in OWNERSHIPS if uid == user_id}
+
+
+def _seed_recent_payment(user_id: str, lookback_days: int) -> set[str]:
+    cutoff = _SEED_NOW - timedelta(days=lookback_days)
+    owned = accounts_for(user_id)
+    return {
+        cp_user
+        for (acct, _c, _d, _cpn, cp_user, _m, ts) in _TX_DATA
+        if acct in owned
+        and cp_user is not None
+        and cp_user != user_id
+        and _ts(ts) >= cutoff
+    }
+
+
+def _seed_joint_co_owner(user_id: str) -> set[str]:
+    owned = accounts_for(user_id)
+    return {uid for (acct, uid) in OWNERSHIPS if acct in owned and uid != user_id}
+
+
+def seed_counterparty_set(user_id: str) -> set[str]:
+    """Apply every rule in POLICY.counterparty_rules to the in-memory seed
+    and return the union. Imported by SeedDerivedAdapter; production code
+    uses the Postgres path in argo.db.queries instead.
+    """
+    from argo.policy import POLICY
+
+    cps: set[str] = set()
+    for rule in POLICY.counterparty_rules:
+        if rule.type == "recent_payment":
+            assert rule.lookback_days is not None
+            cps |= _seed_recent_payment(user_id, rule.lookback_days)
+        elif rule.type == "joint_account_co_owner":
+            cps |= _seed_joint_co_owner(user_id)
+        else:
+            raise ValueError(f"unhandled rule type in seed evaluator: {rule.type}")
+    cps.discard(user_id)
+    return cps
 
 
 # ----- Insert into Postgres ---------------------------------------------

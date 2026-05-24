@@ -38,6 +38,7 @@ from threading import Lock
 from typing import Protocol
 
 from argo.claims import Claim, ClaimType
+from argo.policy import POLICY, CounterpartyRule
 
 
 class ClaimVerdict(StrEnum):
@@ -86,11 +87,11 @@ class UnknownUserError(KeyError):
     """Raised when get_bundle() is called with an id the adapter does not know."""
 
 
-_COUNTERPARTY_FIELDS: frozenset[ClaimType] = frozenset({
-    "transaction",       # name + amount + date + direction + memo (verified via source-span)
-    "account_ownership", # naming a co-owner of an account the asking user owns
-    "aggregate",         # totals/counts restricted to asking-user↔counterparty interaction
-})
+# The whitelist of disclosable claim types for counterparty-role claims, and
+# the counterparty graph rules, both live in `argo/policy/banking.toml`.
+# Each adapter applies the rules through its own data source (Postgres vs.
+# in-memory seed) but the policy itself is single-sourced.
+_COUNTERPARTY_FIELDS: frozenset[ClaimType] = POLICY.counterparty_fields
 
 
 # ----- DbDerivedAdapter: production adapter ------------------------------
@@ -150,23 +151,36 @@ class DbDerivedAdapter:
             self._cache[user_id] = (time.monotonic() + self._ttl, bundle)
 
     def _fetch(self, user_id: str) -> EntitlementBundle:
-        from argo.db.queries import (
-            get_account_ids_for_user,
-            get_counterparty_user_ids_for_user,
-            get_user,
-        )
+        from argo.db.queries import get_account_ids_for_user, get_user
 
         if get_user(user_id) is None:
             raise UnknownUserError(user_id)
 
         accts = get_account_ids_for_user(user_id)
-        cps = get_counterparty_user_ids_for_user(user_id)
+        cps: set[str] = set()
+        for rule in POLICY.counterparty_rules:
+            cps |= self._apply_rule(rule, user_id)
+        cps.discard(user_id)
         return EntitlementBundle(
             user_id=user_id,
             owned_subjects=frozenset({user_id, *accts}),
             counterparty_visible=frozenset(cps),
             counterparty_fields=_COUNTERPARTY_FIELDS,
         )
+
+    @staticmethod
+    def _apply_rule(rule: CounterpartyRule, user_id: str) -> set[str]:
+        from argo.db.queries import (
+            get_joint_account_co_owners,
+            get_recent_payment_counterparties,
+        )
+
+        if rule.type == "recent_payment":
+            assert rule.lookback_days is not None  # policy loader guarantees this
+            return set(get_recent_payment_counterparties(user_id, rule.lookback_days))
+        if rule.type == "joint_account_co_owner":
+            return set(get_joint_account_co_owners(user_id))
+        raise ValueError(f"unhandled rule type: {rule.type}")
 
 
 # ----- SeedDerivedAdapter: in-memory adapter for tests / dev REPL --------
@@ -183,13 +197,17 @@ class SeedDerivedAdapter:
     """
 
     def __init__(self) -> None:
-        from argo.db.seed import USERS, accounts_for, counterparties_for
+        from argo.db.seed import USERS, accounts_for, seed_counterparty_set
 
+        # SeedDerivedAdapter applies the same POLICY rules as production,
+        # but against the in-memory seed dataset. Tests stay deterministic
+        # because the seed module pins its own reference "now" derived from
+        # the latest tx date, not wall-clock time.
         self._bundles: dict[str, EntitlementBundle] = {
             u["id"]: EntitlementBundle(
                 user_id=u["id"],
                 owned_subjects=frozenset({u["id"]} | accounts_for(u["id"])),
-                counterparty_visible=frozenset(counterparties_for(u["id"])),
+                counterparty_visible=frozenset(seed_counterparty_set(u["id"])),
                 counterparty_fields=_COUNTERPARTY_FIELDS,
             )
             for u in USERS

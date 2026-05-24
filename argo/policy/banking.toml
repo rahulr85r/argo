@@ -1,0 +1,60 @@
+# Argo Phase 0 banking policy.
+#
+# This file is the GRC-reviewable artifact. Everything below answers two
+# product questions a regulator or compliance reviewer should be able to
+# read in one sitting, without reading any Python:
+#
+#   1. counterparty_fields — for someone who counts as a counterparty of
+#      the asking user, which CLAIM TYPES may surface in synthesized
+#      output? Anything not on this list is denied by default.
+#
+#   2. counterparty_rules — which RELATIONSHIPS qualify another user as
+#      a counterparty in the first place? Anyone who matches none of
+#      these rules is BLOCKED outright (the model can't even attempt to
+#      mention them under counterparty role).
+#
+# Change-control note: edits to this file are policy changes. They are
+# meant to be reviewed and version-controlled like any other policy
+# artifact, not edited at runtime.
+
+
+# ----- counterparty_fields ----------------------------------------------
+#
+# Whitelist. Each entry is a ClaimType from argo/claims.py.
+#
+# Currently allowed:
+#   transaction         — a tx the asking user is on, naming the
+#                         counterparty (amount/date/direction/memo)
+#   account_ownership   — naming a co-owner of an account the asking
+#                         user also owns (e.g. joint account)
+#   aggregate           — totals/counts restricted to the asking-user ↔
+#                         counterparty interaction
+#
+# Deliberately NOT on the list (would BLOCK even for valid counterparties):
+#   balance, account_number, contact_email, customer_status.
+
+counterparty_fields = ["transaction", "account_ownership", "aggregate"]
+
+
+# ----- counterparty_rules -----------------------------------------------
+#
+# A user becomes a counterparty of the asking user iff at least ONE
+# rule below matches. Rules are ORed; the union of their outputs is
+# the counterparty set passed to the policy engine.
+
+[[counterparty_rules]]
+# Recent transactional activity. Anyone who appeared as counterparty
+# on a tx on one of the asking user's accounts in the last N days.
+# Stale relationships drop off the visible graph automatically — Alice
+# paying Joel $75 once in 2026 should NOT give Alice visibility into
+# Joel forever.
+type = "recent_payment"
+lookback_days = 90
+
+[[counterparty_rules]]
+# Co-ownership of any account. If A and B both own a joint account,
+# B is a counterparty of A (and vice versa) for as long as the
+# ownership record exists, independent of tx activity. Removing this
+# rule would make joint co-owners invisible to each other until they
+# moved money through the joint.
+type = "joint_account_co_owner"
