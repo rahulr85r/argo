@@ -6,6 +6,14 @@ The verifier is what catches Q3's three hallucinations — the entitlement
 layer says "Charlie is a valid counterparty for Alice", and the verifier
 then says "but no May-16 A→C $189 row exists, so REDACT".
 
+The verifier is **policy-independent**: it answers "is this claim grounded
+in retrieved context?", not "is this claim allowed?" A fabricated fact
+about any entity — even one the entitlement layer would have allowed —
+fails verification because there is no source span to match. This is the
+only layer that catches hallucinated leaks regardless of how the bank has
+configured the entitlement whitelist; the failure mode IAM/MCP-style gates
+cannot reach, because the data they were asked to release never existed.
+
 Phase 0 uses Haiku in a batch judge call: one prompt per response,
 containing all NEEDS_SOURCE_CHECK claims plus the asking user's full tx
 table, returning a per-claim match decision. Batch keeps latency at ~1

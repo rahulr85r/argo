@@ -14,6 +14,15 @@ The verdict drives the rewriter:
 
 Phase 0 ships HardcodedAdapter (A/B/C). Phase 1 swaps it for an Okta-/
 Entra-/Auth0-backed adapter; the EntitlementAdapter Protocol is the seam.
+
+**Design intent: whitelist, not blacklist.** `counterparty_fields`
+enumerates what is *allowed* for counterparty-role claims; everything
+else BLOCKs by default. This is deliberate. A blacklist requires
+anticipating every leak — the policy fails the moment the model invents
+a new way to disclose. A whitelist requires only auditing the allow-list,
+which is small enough for a human reviewer to hold in one screen. Argo's
+bound on the bank is "review this allow-list" rather than "predict the
+LLM's failure modes."
 """
 
 from __future__ import annotations
