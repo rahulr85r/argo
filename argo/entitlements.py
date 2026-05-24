@@ -86,27 +86,24 @@ _COUNTERPARTY_FIELDS: frozenset[ClaimType] = frozenset({
 })
 
 
-# A↔B via joint, A↔C via direct transfers, B↔C via direct transfers — full mesh.
-_BUNDLES: dict[str, EntitlementBundle] = {
-    "user_a": EntitlementBundle(
-        user_id="user_a",
-        owned_subjects=frozenset({"user_a", "acct_a_chk", "acct_ab_joint"}),
-        counterparty_visible=frozenset({"user_b", "user_c"}),
-        counterparty_fields=_COUNTERPARTY_FIELDS,
-    ),
-    "user_b": EntitlementBundle(
-        user_id="user_b",
-        owned_subjects=frozenset({"user_b", "acct_b_chk", "acct_ab_joint"}),
-        counterparty_visible=frozenset({"user_a", "user_c"}),
-        counterparty_fields=_COUNTERPARTY_FIELDS,
-    ),
-    "user_c": EntitlementBundle(
-        user_id="user_c",
-        owned_subjects=frozenset({"user_c", "acct_c_chk"}),
-        counterparty_visible=frozenset({"user_a", "user_b"}),
-        counterparty_fields=_COUNTERPARTY_FIELDS,
-    ),
-}
+# Bundles are derived from the seed dataset at module load time. Adding a
+# new user or transaction in seed.py automatically reshapes the visible
+# graph — there is nothing to hand-edit here.
+def _build_bundles() -> dict[str, EntitlementBundle]:
+    from argo.db.seed import USERS, accounts_for, counterparties_for
+
+    return {
+        u["id"]: EntitlementBundle(
+            user_id=u["id"],
+            owned_subjects=frozenset({u["id"]} | accounts_for(u["id"])),
+            counterparty_visible=frozenset(counterparties_for(u["id"])),
+            counterparty_fields=_COUNTERPARTY_FIELDS,
+        )
+        for u in USERS
+    }
+
+
+_BUNDLES: dict[str, EntitlementBundle] = _build_bundles()
 
 
 class HardcodedAdapter:

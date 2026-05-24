@@ -117,7 +117,7 @@ def test_known_users_resolve() -> None:
 
 def test_unknown_user_raises() -> None:
     with pytest.raises(UnknownUserError):
-        HardcodedAdapter().get_bundle("user_z")
+        HardcodedAdapter().get_bundle("user_does_not_exist")
 
 
 def test_bundle_is_immutable() -> None:
