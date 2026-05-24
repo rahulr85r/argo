@@ -12,8 +12,12 @@ The verdict drives the rewriter:
                       are trusted because the chat path renders those from
                       the DB into the system prompt.
 
-Phase 0 ships HardcodedAdapter (A/B/C). Phase 1 swaps it for an Okta-/
-Entra-/Auth0-backed adapter; the EntitlementAdapter Protocol is the seam.
+Phase 0 ships two adapters behind the same Protocol:
+  - `DbDerivedAdapter` (production) — pulls owned accounts and counterparty
+    user_ids from Postgres on each call, with a short in-process TTL cache.
+  - `SeedDerivedAdapter` (test/dev only) — builds bundles from the seed
+    module so policy tests can run without a live database.
+Phase 1 adds Okta/Entra/Auth0/OPA adapters with the same shape.
 
 **Design intent: whitelist, not blacklist.** `counterparty_fields`
 enumerates what is *allowed* for counterparty-role claims; everything
@@ -27,8 +31,10 @@ LLM's failure modes."
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from enum import StrEnum
+from threading import Lock
 from typing import Protocol
 
 from argo.claims import Claim, ClaimType
@@ -71,12 +77,13 @@ class EntitlementBundle:
 
 
 class EntitlementAdapter(Protocol):
-    """Phase-1 seam. HardcodedAdapter implements this for Phase 0."""
+    """The seam every entitlement source must implement."""
 
     def get_bundle(self, user_id: str) -> EntitlementBundle: ...
 
 
-# ----- Hardcoded Phase 0 adapter -----------------------------------------
+class UnknownUserError(KeyError):
+    """Raised when get_bundle() is called with an id the adapter does not know."""
 
 
 _COUNTERPARTY_FIELDS: frozenset[ClaimType] = frozenset({
@@ -86,42 +93,113 @@ _COUNTERPARTY_FIELDS: frozenset[ClaimType] = frozenset({
 })
 
 
-# Bundles are derived from the seed dataset at module load time. Adding a
-# new user or transaction in seed.py automatically reshapes the visible
-# graph — there is nothing to hand-edit here.
-def _build_bundles() -> dict[str, EntitlementBundle]:
-    from argo.db.seed import USERS, accounts_for, counterparties_for
+# ----- DbDerivedAdapter: production adapter ------------------------------
 
-    return {
-        u["id"]: EntitlementBundle(
-            user_id=u["id"],
-            owned_subjects=frozenset({u["id"]} | accounts_for(u["id"])),
-            counterparty_visible=frozenset(counterparties_for(u["id"])),
+
+_DEFAULT_TTL_SECONDS = 30.0
+
+
+class DbDerivedAdapter:
+    """Production adapter: builds each bundle from a live Postgres lookup.
+
+    Two SQL queries per cache miss — one for owned accounts, one for the
+    counterparty user_ids the asking user has a transactional link to. A
+    short-TTL in-process cache absorbs the burst of repeated lookups inside
+    a single chat session without pinning a bundle long enough to outlive a
+    real entitlement change. `invalidate()` is exposed for places that know
+    they just mutated the underlying data (admin writes, test fixtures).
+
+    The Phase-1 Okta/Entra/OPA adapters will implement the same Protocol —
+    only `_fetch()` changes shape.
+    """
+
+    def __init__(self, ttl_seconds: float = _DEFAULT_TTL_SECONDS) -> None:
+        self._ttl = ttl_seconds
+        self._cache: dict[str, tuple[float, EntitlementBundle]] = {}
+        self._lock = Lock()
+
+    def get_bundle(self, user_id: str) -> EntitlementBundle:
+        cached = self._cached(user_id)
+        if cached is not None:
+            return cached
+        bundle = self._fetch(user_id)
+        self._store(user_id, bundle)
+        return bundle
+
+    def invalidate(self, user_id: str | None = None) -> None:
+        with self._lock:
+            if user_id is None:
+                self._cache.clear()
+            else:
+                self._cache.pop(user_id, None)
+
+    def _cached(self, user_id: str) -> EntitlementBundle | None:
+        now = time.monotonic()
+        with self._lock:
+            entry = self._cache.get(user_id)
+            if entry is None:
+                return None
+            expires, bundle = entry
+            if now > expires:
+                del self._cache[user_id]
+                return None
+            return bundle
+
+    def _store(self, user_id: str, bundle: EntitlementBundle) -> None:
+        with self._lock:
+            self._cache[user_id] = (time.monotonic() + self._ttl, bundle)
+
+    def _fetch(self, user_id: str) -> EntitlementBundle:
+        from argo.db.queries import (
+            get_account_ids_for_user,
+            get_counterparty_user_ids_for_user,
+            get_user,
+        )
+
+        if get_user(user_id) is None:
+            raise UnknownUserError(user_id)
+
+        accts = get_account_ids_for_user(user_id)
+        cps = get_counterparty_user_ids_for_user(user_id)
+        return EntitlementBundle(
+            user_id=user_id,
+            owned_subjects=frozenset({user_id, *accts}),
+            counterparty_visible=frozenset(cps),
             counterparty_fields=_COUNTERPARTY_FIELDS,
         )
-        for u in USERS
-    }
 
 
-_BUNDLES: dict[str, EntitlementBundle] = _build_bundles()
+# ----- SeedDerivedAdapter: in-memory adapter for tests / dev REPL --------
 
 
-class HardcodedAdapter:
-    """Phase-0 adapter — bundles baked from seed.py.
+class SeedDerivedAdapter:
+    """In-memory adapter that builds bundles from `argo.db.seed` at load time.
 
-    Designed so the call site (`adapter.get_bundle(user_id)`) is identical
-    to what an Okta/Entra adapter will expose; only the storage changes.
+    This adapter exists so the policy-engine test suite (`check_claim`) can
+    run without a live Postgres. It is **not** used in production — the
+    pipeline wires `DbDerivedAdapter`. If you import this class from
+    anywhere outside `tests/` or an interactive REPL, you are almost
+    certainly making a mistake.
     """
+
+    def __init__(self) -> None:
+        from argo.db.seed import USERS, accounts_for, counterparties_for
+
+        self._bundles: dict[str, EntitlementBundle] = {
+            u["id"]: EntitlementBundle(
+                user_id=u["id"],
+                owned_subjects=frozenset({u["id"]} | accounts_for(u["id"])),
+                counterparty_visible=frozenset(counterparties_for(u["id"])),
+                counterparty_fields=_COUNTERPARTY_FIELDS,
+            )
+            for u in USERS
+        }
 
     def get_bundle(self, user_id: str) -> EntitlementBundle:
         try:
-            return _BUNDLES[user_id]
+            return self._bundles[user_id]
         except KeyError as e:
             raise UnknownUserError(user_id) from e
-
-
-class UnknownUserError(KeyError):
-    """Raised when get_bundle() is called with an id not in the bundle map."""
 
 
 # ----- Policy ------------------------------------------------------------

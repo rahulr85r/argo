@@ -12,7 +12,7 @@ import pytest
 from argo.claims import Claim
 from argo.entitlements import (
     ClaimVerdict,
-    HardcodedAdapter,
+    SeedDerivedAdapter,
     VerdictResult,
     check_claim,
 )
@@ -34,7 +34,7 @@ def _claims_for(ex_id: str) -> list[Claim]:
 def _entitlement_verdicts(ex_id: str) -> list[tuple[Claim, VerdictResult]]:
     """Run only the entitlement layer — leaves NEEDS_SOURCE_CHECK intact."""
     ex = LABELED[ex_id]
-    bundle = HardcodedAdapter().get_bundle(ex["user_id"])
+    bundle = SeedDerivedAdapter().get_bundle(ex["user_id"])
     claims = _claims_for(ex_id)
     return [(c, check_claim(c, bundle)) for c in claims]
 

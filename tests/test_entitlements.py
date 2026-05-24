@@ -17,7 +17,7 @@ from argo.claims import Claim
 from argo.entitlements import (
     ClaimVerdict,
     EntitlementBundle,
-    HardcodedAdapter,
+    SeedDerivedAdapter,
     UnknownUserError,
     check_claim,
 )
@@ -87,7 +87,7 @@ def _params():
 
 @pytest.mark.parametrize("claim,asking_user_id,expected", _params())
 def test_verdict(claim: Claim, asking_user_id: str, expected: ClaimVerdict) -> None:
-    bundle = HardcodedAdapter().get_bundle(asking_user_id)
+    bundle = SeedDerivedAdapter().get_bundle(asking_user_id)
     result = check_claim(claim, bundle)
     assert result.verdict == expected, (
         f"expected {expected} got {result.verdict}\n"
@@ -106,7 +106,7 @@ def test_all_labeled_examples_have_expected_verdicts() -> None:
 
 
 def test_known_users_resolve() -> None:
-    adapter = HardcodedAdapter()
+    adapter = SeedDerivedAdapter()
     for uid in ("user_a", "user_b", "user_c"):
         bundle = adapter.get_bundle(uid)
         assert bundle.user_id == uid
@@ -117,13 +117,13 @@ def test_known_users_resolve() -> None:
 
 def test_unknown_user_raises() -> None:
     with pytest.raises(UnknownUserError):
-        HardcodedAdapter().get_bundle("user_does_not_exist")
+        SeedDerivedAdapter().get_bundle("user_does_not_exist")
 
 
 def test_bundle_is_immutable() -> None:
     """EntitlementBundle uses frozenset + frozen dataclass so adapter responses
     can be cached/shared without policy mutation risks."""
-    bundle = HardcodedAdapter().get_bundle("user_a")
+    bundle = SeedDerivedAdapter().get_bundle("user_a")
     with pytest.raises(AttributeError):
         bundle.user_id = "user_z"  # type: ignore[misc]
     assert isinstance(bundle.owned_subjects, frozenset)
@@ -138,7 +138,7 @@ def test_verdict_distribution_matches_demo_design() -> None:
     BLOCK, Q3 routes to source-check (verifier separates real from fake)."""
     def verdicts_for(ex_id: str) -> list[ClaimVerdict]:
         ex = LABELED_BY_ID[ex_id]
-        bundle = HardcodedAdapter().get_bundle(ex["user_id"])
+        bundle = SeedDerivedAdapter().get_bundle(ex["user_id"])
         return [
             check_claim(Claim.model_validate(c), bundle).verdict
             for c in ex["expected_claims"]

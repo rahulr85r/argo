@@ -16,7 +16,7 @@ from argo.claims import Claim
 from argo.db.audit import AuditEvent, AuditedClaim, write_audit_event
 from argo.entitlements import (
     ClaimVerdict,
-    HardcodedAdapter,
+    DbDerivedAdapter,
     UnknownUserError,
     VerdictResult,
     check_claim,
@@ -63,12 +63,18 @@ class ArgoChatResponse(BaseModel):
 # ----- pipeline ----------------------------------------------------------
 
 
+# Module-level adapter so the in-process TTL cache survives across requests.
+# Replace with an Okta/Entra/OPA-backed adapter in Phase 1 — anything that
+# satisfies the EntitlementAdapter Protocol plugs in here.
+_ENTITLEMENT_ADAPTER = DbDerivedAdapter()
+
+
 def run_argo_pipeline(user_id: str, query: str) -> ArgoChatResponse:
     """The full Argo gate. Raises UnknownUserError for an unknown user_id."""
     t_total_start = time.perf_counter()
 
     # 0. Resolve bundle up-front so an invalid user_id fails fast.
-    bundle = HardcodedAdapter().get_bundle(user_id)
+    bundle = _ENTITLEMENT_ADAPTER.get_bundle(user_id)
 
     # 1. Naive chat — same code path as the baseline /chat endpoint.
     raw_response, chat_model, chat_ms = naive_chat(user_id, query)

@@ -48,6 +48,49 @@ def get_all_transactions() -> list[dict]:
         return cur.fetchall()
 
 
+def get_account_ids_for_user(user_id: str) -> list[str]:
+    """Return account_ids the user owns (individual + every joint they are on)."""
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT account_id FROM account_owners WHERE user_id = %s",
+            (user_id,),
+        )
+        return [r["account_id"] for r in cur.fetchall()]
+
+
+def get_counterparty_user_ids_for_user(user_id: str) -> list[str]:
+    """Distinct user_ids the asking user has a transactional link to.
+
+    Two paths qualify:
+      (a) any tx on an account the user owns naming the other party as
+          counterparty_user_id,
+      (b) anyone else who co-owns an account the user is on (joint-account
+          co-owners — even before they exchange any tx, the co-ownership
+          itself is a visibility-creating relationship).
+    """
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT DISTINCT cp_user FROM (
+                SELECT t.counterparty_user_id AS cp_user
+                FROM transactions t
+                JOIN account_owners ao ON ao.account_id = t.account_id
+                WHERE ao.user_id = %(uid)s
+                  AND t.counterparty_user_id IS NOT NULL
+                  AND t.counterparty_user_id <> %(uid)s
+                UNION
+                SELECT other.user_id AS cp_user
+                FROM account_owners mine
+                JOIN account_owners other USING (account_id)
+                WHERE mine.user_id = %(uid)s
+                  AND other.user_id <> %(uid)s
+            ) cps
+            """,
+            {"uid": user_id},
+        )
+        return [r["cp_user"] for r in cur.fetchall()]
+
+
 def get_user_transactions(user_id: str) -> list[dict]:
     """Transactions on every account the user owns (individual + joint).
 
