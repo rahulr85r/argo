@@ -31,7 +31,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 from pydantic import ValidationError
 
@@ -39,6 +39,28 @@ from argo.claims import Claim
 from argo.db.queries import get_user_transactions
 from argo.entitlements import ClaimVerdict, VerdictResult
 from argo.llm import call_judge_model
+
+
+class Verifier(Protocol):
+    """The seam every source-span verifier must implement.
+
+    Given the entitlement layer's claim list (some with terminal verdicts
+    ALLOW/BLOCK, some still NEEDS_SOURCE_CHECK), the verifier resolves
+    every NEEDS_SOURCE_CHECK to ALLOW or REDACT by checking whether the
+    asking user's actual data supports the claim. Other verdicts pass
+    through unchanged.
+
+    The default implementation (`LlmVerifier`) uses a batched Haiku call
+    against the user's transaction history. A bank might replace this
+    with a deterministic SQL match (cheaper, faster, more auditable —
+    at the cost of strictness on memo/string fuzziness).
+    """
+
+    def resolve(
+        self,
+        claims_with_verdicts: list[tuple[Claim, VerdictResult]],
+        user_id: str,
+    ) -> list[tuple[Claim, VerdictResult]]: ...
 
 
 @dataclass(frozen=True)
@@ -187,29 +209,57 @@ def verify_transaction_claims(
     return out
 
 
+class LlmVerifier:
+    """Default `Verifier` — batched Haiku call against the user's tx history.
+
+    Resolves every NEEDS_SOURCE_CHECK claim in one judge round-trip; other
+    verdicts pass through. Empty inputs are a no-op (no LLM call), so the
+    common case of "all claims are ALLOW or BLOCK already" costs nothing.
+    """
+
+    def resolve(
+        self,
+        claims_with_verdicts: list[tuple[Claim, VerdictResult]],
+        user_id: str,
+    ) -> list[tuple[Claim, VerdictResult]]:
+        to_verify_indices: list[int] = []
+        to_verify_claims: list[Claim] = []
+        for i, (c, v) in enumerate(claims_with_verdicts):
+            if v.verdict == ClaimVerdict.NEEDS_SOURCE_CHECK:
+                to_verify_indices.append(i)
+                to_verify_claims.append(c)
+
+        if not to_verify_claims:
+            return list(claims_with_verdicts)
+
+        matches = verify_transaction_claims(to_verify_claims, user_id)
+
+        out = list(claims_with_verdicts)
+        for idx, m in zip(to_verify_indices, matches, strict=True):
+            c, _ = out[idx]
+            out[idx] = (c, VerdictResult(verdict=m.verdict, reason=m.reason))
+        return out
+
+
 def resolve_verdicts(
     claims_with_verdicts: list[tuple[Claim, VerdictResult]],
     asking_user_id: str,
 ) -> list[tuple[Claim, VerdictResult]]:
-    """Run the verifier on every NEEDS_SOURCE_CHECK in `claims_with_verdicts`.
+    """Convenience wrapper around the active Verifier's `.resolve()`.
 
-    Returns the same list with NEEDS_SOURCE_CHECK verdicts replaced by
-    ALLOW or REDACT. Other verdicts (ALLOW, BLOCK) pass through unchanged.
+    Lazy-imported singleton so cyclic config/plugin loads stay clean.
     """
-    to_verify_indices: list[int] = []
-    to_verify_claims: list[Claim] = []
-    for i, (c, v) in enumerate(claims_with_verdicts):
-        if v.verdict == ClaimVerdict.NEEDS_SOURCE_CHECK:
-            to_verify_indices.append(i)
-            to_verify_claims.append(c)
+    return _get_verifier().resolve(claims_with_verdicts, asking_user_id)
 
-    if not to_verify_claims:
-        return list(claims_with_verdicts)
 
-    matches = verify_transaction_claims(to_verify_claims, asking_user_id)
+_VERIFIER: Verifier | None = None
 
-    out = list(claims_with_verdicts)
-    for idx, m in zip(to_verify_indices, matches, strict=True):
-        c, _ = out[idx]
-        out[idx] = (c, VerdictResult(verdict=m.verdict, reason=m.reason))
-    return out
+
+def _get_verifier() -> Verifier:
+    global _VERIFIER
+    if _VERIFIER is None:
+        from argo.config import settings
+        from argo.plugins import load_plugin
+
+        _VERIFIER = load_plugin(settings.verifier)  # type: ignore[assignment]
+    return _VERIFIER  # type: ignore[return-value]

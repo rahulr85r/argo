@@ -14,15 +14,17 @@ from pydantic import BaseModel, Field
 
 from argo.claims import Claim
 from argo.db.audit import AuditEvent, AuditedClaim, write_audit_event
+from argo.config import settings
 from argo.entitlements import (
     ClaimVerdict,
-    DbDerivedAdapter,
+    EntitlementAdapter,
     UnknownUserError,
     VerdictResult,
     check_claim,
 )
 from argo.judge import ExtractionError, extract_claims_raw
 from argo.naive import naive_chat
+from argo.plugins import load_plugin
 from argo.rewriter import REFUSAL_TEXT, rewrite_response
 from argo.verifier import resolve_verdicts
 
@@ -63,10 +65,10 @@ class ArgoChatResponse(BaseModel):
 # ----- pipeline ----------------------------------------------------------
 
 
-# Module-level adapter so the in-process TTL cache survives across requests.
-# Replace with an Okta/Entra/OPA-backed adapter in Phase 1 — anything that
-# satisfies the EntitlementAdapter Protocol plugs in here.
-_ENTITLEMENT_ADAPTER = DbDerivedAdapter()
+# Module-level adapter so any in-process cache survives across requests.
+# The class is selected at startup by ARGO_ENTITLEMENT_ADAPTER; defaults
+# to argo.entitlements:DbDerivedAdapter. See ADAPTERS.md for swap-in.
+_ENTITLEMENT_ADAPTER: EntitlementAdapter = load_plugin(settings.entitlement_adapter)  # type: ignore[assignment]
 
 
 def run_argo_pipeline(user_id: str, query: str) -> ArgoChatResponse:

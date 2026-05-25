@@ -1,15 +1,19 @@
-"""Audit-log writer + reader.
+"""Audit-log Protocol + Postgres default implementation.
 
-One row per /chat/argo call. The `claim_audit` jsonb column holds the full
-per-claim trail the demo's audit panel renders — text, subject, type, role,
-source_span, verdict, reason. Aggregates (whole_blocked, redacted_chars,
-latencies) live alongside for fast filtering and the demo summary stats.
+One audit event per /chat/argo call. The default writer persists to
+Postgres so the demo and tests work without external infrastructure;
+production deployments typically swap in a writer that ships events to
+the bank's SIEM (Splunk HEC, Datadog Logs, Kafka, etc.).
+
+To plug in your own writer, implement the `AuditWriter` Protocol and
+point `ARGO_AUDIT_WRITER` at `your_module:YourClass`. See ADAPTERS.md.
 """
 
 from __future__ import annotations
 
 import json
 from datetime import datetime
+from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -57,32 +61,77 @@ class AuditEventRecord(AuditEvent):
     ts: datetime
 
 
-def write_audit_event(event: AuditEvent) -> int:
-    """Persist one audit row. Returns the assigned id."""
-    claim_audit_json = json.dumps([c.model_dump() for c in event.claim_audit])
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute(
-            """
-            INSERT INTO audit_events (
-              user_id, query, raw_response, final_response, whole_blocked,
-              redacted_chars, claim_audit, chat_model, chat_latency_ms,
-              extractor_latency_ms, verifier_latency_ms
-            ) VALUES (
-              %s, %s, %s, %s, %s,
-              %s, %s::jsonb, %s, %s,
-              %s, %s
-            ) RETURNING id
-            """,
-            (
-                event.user_id, event.query, event.raw_response, event.final_response,
-                event.whole_blocked, event.redacted_chars, claim_audit_json,
-                event.chat_model, event.chat_latency_ms,
-                event.extractor_latency_ms, event.verifier_latency_ms,
-            ),
-        )
-        row = cur.fetchone()
-        conn.commit()
-        return int(row["id"])
+class AuditWriter(Protocol):
+    """The seam every audit destination must implement.
+
+    `write()` must be synchronous — the pipeline waits for it before
+    returning the user's response. If the underlying transport is slow
+    or unreliable, implement an async-handoff inside `write()` (drop
+    into a local queue, flush in a background thread) rather than
+    blocking the request.
+
+    Returning None is allowed for fire-and-forget destinations; the
+    Postgres default returns the assigned row id.
+    """
+
+    def write(self, event: "AuditEvent") -> int | None: ...
+
+
+class PostgresAuditWriter:
+    """Default `AuditWriter` — INSERT into the `audit_events` table.
+
+    The schema is owned by Argo (see argo/db/schema.sql). Banks who want
+    audit in their own systems should write a separate AuditWriter; the
+    Postgres rows are useful for the demo UI but are not the source of
+    truth in a production deployment.
+    """
+
+    def write(self, event: "AuditEvent") -> int:
+        claim_audit_json = json.dumps([c.model_dump() for c in event.claim_audit])
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO audit_events (
+                  user_id, query, raw_response, final_response, whole_blocked,
+                  redacted_chars, claim_audit, chat_model, chat_latency_ms,
+                  extractor_latency_ms, verifier_latency_ms
+                ) VALUES (
+                  %s, %s, %s, %s, %s,
+                  %s, %s::jsonb, %s, %s,
+                  %s, %s
+                ) RETURNING id
+                """,
+                (
+                    event.user_id, event.query, event.raw_response, event.final_response,
+                    event.whole_blocked, event.redacted_chars, claim_audit_json,
+                    event.chat_model, event.chat_latency_ms,
+                    event.extractor_latency_ms, event.verifier_latency_ms,
+                ),
+            )
+            row = cur.fetchone()
+            conn.commit()
+            return int(row["id"])
+
+
+def write_audit_event(event: AuditEvent) -> int | None:
+    """Convenience wrapper around the active AuditWriter's `.write()`.
+
+    Lazy-imported singleton so cyclic config/plugin loads stay clean.
+    """
+    return _get_writer().write(event)
+
+
+_WRITER: AuditWriter | None = None
+
+
+def _get_writer() -> AuditWriter:
+    global _WRITER
+    if _WRITER is None:
+        from argo.config import settings
+        from argo.plugins import load_plugin
+
+        _WRITER = load_plugin(settings.audit_writer)  # type: ignore[assignment]
+    return _WRITER  # type: ignore[return-value]
 
 
 def get_recent_audit_events(
