@@ -1,9 +1,21 @@
-"""End-to-end /chat/argo pipeline: naive chat → extract → entitlement check
-→ source-span verify → rewrite → audit-log.
+"""Argo pipeline — two entry points sharing the same gating stages.
 
-Returns ArgoChatResponse with both the raw LLM output and the rewritten
-text, so the demo's split-screen UI can render naive-vs-Argo side by side
-from a single round-trip. Per-claim verdicts + reasons feed the audit panel.
+`gate_response()` is the **production integration point**: it takes a
+pre-generated LLM response and runs only the gating stages (extract →
+entitlement-check → source-verify → rewrite → audit). This is what the
+`POST /argo/gate` endpoint calls, and it's what real banks integrate
+against — their own chat orchestrator builds the LLM context, makes
+the LLM call, and hands the raw response to Argo for gating.
+
+`run_argo_pipeline()` is the **demo-shaped wrapper**: it owns the LLM
+call too (via `argo.naive.naive_chat`), so the `POST /chat/argo` endpoint
+can return both the naive raw response and the gated final response from
+a single round-trip — that's what powers the split-screen demo UI. In
+production this wrapper is rarely used; the bank already has its own
+chat path.
+
+Both paths return the same `ArgoChatResponse` shape so audit semantics
+and UI rendering are identical regardless of entry point.
 """
 
 from __future__ import annotations
@@ -71,18 +83,43 @@ class ArgoChatResponse(BaseModel):
 _ENTITLEMENT_ADAPTER: EntitlementAdapter = load_plugin(settings.entitlement_adapter)  # type: ignore[assignment]
 
 
-def run_argo_pipeline(user_id: str, query: str) -> ArgoChatResponse:
-    """The full Argo gate. Raises UnknownUserError for an unknown user_id."""
+def gate_response(
+    user_id: str,
+    query: str,
+    raw_response: str,
+    *,
+    chat_model: str = "external",
+    chat_ms: int = 0,
+) -> ArgoChatResponse:
+    """Gate a pre-generated LLM response. Production integration point.
+
+    Args:
+        user_id:      Verified asking-user identifier (from your auth proxy).
+        query:        The user's original prompt — used by the extractor for
+                      context and recorded in the audit row.
+        raw_response: The LLM's full response text. This is the artifact Argo
+                      gates; Argo does NOT call the LLM in this path.
+        chat_model:   Identifier of the model that produced `raw_response`.
+                      Recorded in the audit row. Default `"external"` covers
+                      the case where the bank's own chat orchestrator made
+                      the call and Argo can't introspect the model id.
+        chat_ms:      Latency of the upstream chat call, if you want it
+                      recorded for end-to-end timing visibility. Default 0.
+
+    Returns:
+        ArgoChatResponse — same shape as run_argo_pipeline. `raw_response`
+        in the response echoes back the input so the audit row carries the
+        full before/after pair.
+
+    Raises:
+        UnknownUserError: `user_id` not in the entitlement adapter's universe.
+    """
     t_total_start = time.perf_counter()
 
     # 0. Resolve bundle up-front so an invalid user_id fails fast.
     bundle = _ENTITLEMENT_ADAPTER.get_bundle(user_id)
 
-    # 1. Naive chat — same code path as the baseline /chat endpoint.
-    raw_response, chat_model, chat_ms = naive_chat(user_id, query)
-
-    # 2. Extract claims. Fail-closed: an extractor parse failure swaps the
-    #    response for the generic refusal and records the failure in audit.
+    # 1. Extract claims. Fail-closed on parse failure.
     parsed, _raw_extractor, extractor_ms = extract_claims_raw(raw_response, user_id)
     if parsed is None:
         return _audit_and_return(
@@ -96,20 +133,20 @@ def run_argo_pipeline(user_id: str, query: str) -> ArgoChatResponse:
             extractor_failure=True,
         )
 
-    # 3. Entitlement check (synchronous, no LLM).
+    # 2. Entitlement check (synchronous, no LLM).
     claims_with_verdicts: list[tuple[Claim, VerdictResult]] = [
         (c, check_claim(c, bundle)) for c in parsed.claims
     ]
 
-    # 4. Source-span verifier resolves any NEEDS_SOURCE_CHECK to ALLOW or REDACT.
+    # 3. Source-span verifier resolves any NEEDS_SOURCE_CHECK to ALLOW or REDACT.
     t_verify_start = time.perf_counter()
     resolved = resolve_verdicts(claims_with_verdicts, user_id)
     verifier_ms = int((time.perf_counter() - t_verify_start) * 1000)
 
-    # 5. Rewrite the response with terminal verdicts.
+    # 4. Rewrite the response with terminal verdicts.
     rewrite = rewrite_response(raw_response, resolved)
 
-    # 6. Audit + return.
+    # 5. Audit + return.
     return _audit_and_return(
         user_id=user_id, query=query,
         raw_response=raw_response, final_response=rewrite.final_response,
@@ -118,6 +155,24 @@ def run_argo_pipeline(user_id: str, query: str) -> ArgoChatResponse:
         chat_model=chat_model, chat_ms=chat_ms,
         extractor_ms=extractor_ms, verifier_ms=verifier_ms,
         t_total_start=t_total_start,
+    )
+
+
+def run_argo_pipeline(user_id: str, query: str) -> ArgoChatResponse:
+    """Demo-shaped wrapper: own the LLM call, then gate the response.
+
+    Calls `argo.naive.naive_chat` to produce a raw_response from the bank's
+    full customer dataset, then delegates to `gate_response()` for stages
+    1-5. Used by `POST /chat/argo` to power the split-screen UI; production
+    integrations should call `gate_response()` directly via `/argo/gate`.
+    """
+    raw_response, chat_model, chat_ms = naive_chat(user_id, query)
+    return gate_response(
+        user_id=user_id,
+        query=query,
+        raw_response=raw_response,
+        chat_model=chat_model,
+        chat_ms=chat_ms,
     )
 
 
@@ -196,5 +251,6 @@ __all__ = [
     "PipelineTimings",
     "UnknownUserError",
     "ExtractionError",
+    "gate_response",
     "run_argo_pipeline",
 ]

@@ -49,8 +49,13 @@ flowchart TB
     subgraph Gateway["FastAPI Gateway · <code>argo/main.py</code>"]
         EpHealth["GET /health"]
         EpChat["POST /chat<br/>(naive baseline)"]
-        EpArgo["POST /chat/argo<br/>(gated pipeline)"]
+        EpArgo["POST /chat/argo<br/>(demo wrapper)"]
+        EpGate["POST /argo/gate<br/><b>production integration</b>"]
         EpAudit["GET /audit/recent"]
+    end
+
+    subgraph BankChat["Bank's own chat orchestrator (production)"]
+        BankLlm["builds context, calls LLM,<br/>hands raw_response to Argo"]
     end
 
     subgraph Pipeline["Argo Pipeline · <code>argo/pipeline.py</code>"]
@@ -85,14 +90,16 @@ flowchart TB
     end
 
     User --> UI
-    User --> Curl
+    User --> BankChat
     UI -->|HTTP/JSON| EpChat
     UI -->|HTTP/JSON| EpArgo
     UI -->|HTTP/JSON| EpAudit
-    Curl -->|HTTP/JSON| EpArgo
+    BankLlm -->|"HTTP/JSON<br/>{user_id, query, raw_response}"| EpGate
+    Curl -->|HTTP/JSON| EpGate
 
     EpChat -->|sync| S1
-    EpArgo -->|sync| Pipeline
+    EpArgo -->|sync, starts at stage 0| Pipeline
+    EpGate -->|sync, starts at stage 0,<br/>skips stage 1| Pipeline
     EpAudit -->|SELECT| TAudit
     EpHealth -.->|liveness| DB
 
@@ -121,7 +128,9 @@ flowchart TB
     class EpHealth,EpChat,EpArgo,EpAudit gateway
 ```
 
-**Reading the diagram.** A request enters the FastAPI gateway at `POST /chat/argo` and the pipeline runs six stages in order. The bundle resolver (stage 0) is the only piece that consults the policy file directly; it converts the TOML rules into per-user `owned_subjects` + `counterparty_visible` sets via four SQL helpers and caches the result for 30 seconds. Two LLM round-trips happen per request: one for the naive chat (stage 1) and one batched call for both extraction (stage 2) and verification (stage 4) — though the verification call is skipped when no claim needs source-checking. Everything else (entitlement check, rewriter, audit write) is pure Python plus one INSERT.
+**Reading the diagram.** Two entry points share the same pipeline. The production path is `POST /argo/gate`: the bank's chat orchestrator owns stage 1 (the LLM call), then hands the `raw_response` to Argo so only stages 0 + 2–6 run. The demo path `POST /chat/argo` adds stage 1 internally — Argo dumps the bundled customer dataset to the LLM and gates the result, so the split-screen UI can show naive-vs-Argo from one round-trip. Both paths return the same `ArgoChatResponse` shape.
+
+The pipeline runs six stages in order. The bundle resolver (stage 0) is the only piece that consults the policy file directly; it converts the TOML rules into per-user `owned_subjects` + `counterparty_visible` sets via four SQL helpers and caches the result for 30 seconds. Two LLM round-trips happen per request: one for the naive chat (stage 1) and one batched call for both extraction (stage 2) and verification (stage 4) — though the verification call is skipped when no claim needs source-checking. Everything else (entitlement check, rewriter, audit write) is pure Python plus one INSERT.
 
 ## Quick start
 
@@ -150,10 +159,41 @@ uv run pytest                   # run the test suite
 
 | Endpoint | Purpose |
 |---|---|
-| `POST /chat` | Naive baseline — full data dump to the LLM, no gating. The "before" half of the demo. |
-| `POST /chat/argo` | Gated path — extract → entitlement-check → source-verify → rewrite → audit. |
-| `GET /audit/recent` | Recent audit events for the audit panel. |
+| **`POST /argo/gate`** | **Production integration point.** Your chat orchestrator owns the LLM call; Argo gates the response. Takes `{user_id, query, raw_response, chat_model?, chat_latency_ms?}` → returns `ArgoChatResponse` with the gated `final_response` and per-claim `claim_audit`. |
+| `POST /chat/argo` | Demo convenience. Argo owns the LLM call too, so the split-screen UI can render both naive and gated output from one round-trip. Wraps `POST /argo/gate`. |
+| `POST /chat` | Naive baseline only — full data dump to the LLM, no gating. The "before" half of the demo. |
+| `GET /audit/recent` | Recent audit events for the demo audit panel. |
 | `GET /health` | Liveness probe. |
+
+### Integration patterns
+
+**`/argo/gate` is the API real banks use.** The bank's existing chat
+service builds the LLM context (with whatever retrieval / RAG / tool-
+calling logic it already has), calls the LLM, and hands the response to
+Argo for gating. Argo does not own the LLM call in this path.
+
+```python
+# Inside the bank's existing chat service
+llm_response = bank.llm.complete(system=…, user=user_query)
+
+argo_result = httpx.post("http://argo.internal:8000/argo/gate", json={
+    "user_id":     verified_user_id,    # from your auth proxy
+    "query":       user_query,
+    "raw_response": llm_response.text,
+    "chat_model":  llm_response.model,  # optional, for audit
+}).json()
+
+return argo_result["final_response"]    # gated text shown to customer
+```
+
+**`/chat/argo` is the demo convenience wrapper.** It calls `argo.naive`
+to produce a raw_response from Argo's own Postgres, then delegates to
+the same `gate_response()` internals as `/argo/gate`. Useful for the
+split-screen UI and for evaluating Argo against the bundled demo data
+without standing up your own chat orchestrator.
+
+Both endpoints return the same `ArgoChatResponse` shape; audit semantics
+are identical.
 
 ## How it works
 
@@ -168,7 +208,7 @@ The gated path runs six stages (`argo/pipeline.py`):
 
 ### Request lifecycle
 
-End-to-end sequence of a `POST /chat/argo` call, including every external round trip and the cache / fail-closed branches:
+End-to-end sequence of a `POST /chat/argo` call (the demo path, which exercises every stage). The production `POST /argo/gate` path is identical except **stage 1 is skipped** — the bank's own chat orchestrator has already produced the `raw_response`, so the gateway enters at stage 2 with the response in hand.
 
 ```mermaid
 sequenceDiagram

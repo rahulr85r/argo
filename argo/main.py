@@ -8,8 +8,8 @@ from argo.db.bootstrap import init_db
 from argo.entitlements import UnknownUserError
 from argo.judge import ExtractionError
 from argo.naive import naive_chat
-from argo.pipeline import ArgoChatResponse, run_argo_pipeline
-from argo.schemas import ChatRequest, ChatResponse
+from argo.pipeline import ArgoChatResponse, gate_response, run_argo_pipeline
+from argo.schemas import ChatRequest, ChatResponse, GateRequest
 
 
 @asynccontextmanager
@@ -41,11 +41,13 @@ def chat(req: ChatRequest) -> ChatResponse:
 
 @app.post("/chat/argo", response_model=ArgoChatResponse)
 def chat_argo(req: ChatRequest) -> ArgoChatResponse:
-    """Gated path: extract → entitlement-check → source-verify → rewrite → audit.
+    """Demo convenience: own the LLM call + run the gating stages.
 
-    Returns both the naive raw_response and the rewritten final_response so
-    the demo UI renders both panels from one round-trip. claim_audit lists
-    every extracted claim with its verdict + reason for the audit panel.
+    Powers the split-screen UI by returning both the naive raw_response
+    and the rewritten final_response from a single round-trip. Production
+    integrations should call POST /argo/gate instead — that's the path
+    where your own chat orchestrator owns the LLM call and Argo only
+    gates the output.
     """
     try:
         return run_argo_pipeline(req.user_id, req.query)
@@ -55,6 +57,30 @@ def chat_argo(req: ChatRequest) -> ArgoChatResponse:
         # Fail-closed at the endpoint level too — bubble up as 500 so the
         # demo UI can surface the failure clearly rather than silently
         # rendering a refusal that looks like a normal block.
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post("/argo/gate", response_model=ArgoChatResponse)
+def argo_gate(req: GateRequest) -> ArgoChatResponse:
+    """Production integration point: gate a pre-generated LLM response.
+
+    Your chat orchestrator builds the LLM context, makes the LLM call, and
+    gets back a raw response. Hand it to Argo via this endpoint and Argo
+    runs only the gating stages (extract → entitlement-check → source-
+    verify → rewrite → audit). Argo does NOT call the LLM in this path —
+    that stays in your control.
+    """
+    try:
+        return gate_response(
+            user_id=req.user_id,
+            query=req.query,
+            raw_response=req.raw_response,
+            chat_model=req.chat_model,
+            chat_ms=req.chat_latency_ms,
+        )
+    except UnknownUserError as e:
+        raise HTTPException(status_code=400, detail=f"unknown user_id: {e}") from e
+    except ExtractionError as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
