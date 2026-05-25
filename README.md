@@ -296,11 +296,22 @@ sequenceDiagram
 
 **Reading the diagram.** Every coloured band is one of the six pipeline stages. The two LLM endpoints (chat vs judge) are drawn separately even though both call Haiku 4.5 — different system prompts, different roles. Two fail-closed branches are explicit: an unknown `user_id` short-circuits to HTTP 400 at stage 0, and an extractor parse failure short-circuits to a generic refusal with an audit row recording the failure. The verifier (stage 4) is the only stage that may skip its LLM round trip entirely — if no claim needed source-checking, it returns the input unchanged.
 
+## Documentation
+
+| Doc | When to read |
+|---|---|
+| [SECURITY.md](SECURITY.md) | Before deploying. Threat model, trust boundaries, identity contract, known limitations. |
+| [DEPLOYMENT.md](DEPLOYMENT.md) | When you're ready to run it past `docker-compose`. Every env var, Kubernetes shape, common errors. |
+| [ADAPTERS.md](ADAPTERS.md) | When the default Postgres / Anthropic / Postgres-audit stack isn't your stack. Worked Okta + Bedrock + Splunk examples. |
+| [POLICY.md](POLICY.md) | When you're authoring `banking.toml` for your bank. Full reference, validation errors, versioning advice. |
+
 ## Project layout
 
 ```
 argo/               # gateway package — FastAPI app + the six pipeline stages
 argo/db/            # Postgres access, schema, seed data, audit log
+argo/policy/        # GRC-reviewable policy file + loader
+argo/plugins.py     # plugin loader for the four pluggable Protocols
 static/             # demo UI (single-file vanilla HTML/CSS/JS)
 tests/              # pytest suite (entitlement policy + rewriter)
 scripts/            # eval + validation harnesses
