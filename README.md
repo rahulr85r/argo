@@ -1,10 +1,26 @@
 # Argo
 
-The open-source runtime gate that stops your LLM from telling the wrong user the right answer.
+### Compliance won't ship your customer-facing LLM because it might tell the wrong customer the right answer?
+
+### Argo is an open-source runtime gate that checks every LLM response against the asking user's entitlements, redacts what they shouldn't see, and writes a regulator-readable audit row for every claim. Self-hosted. No SaaS. Drops in after your existing IAM.
 
 **Status:** Phase 0 — pre-build, active development. Not production-ready.
 
-## What it does
+---
+
+## The problem
+
+If you've tried to put an LLM in front of customer-facing data at a bank, a fintech, or anywhere with field-level access rules, you've run into the same wall. Your IAM, your RBAC, your row-level security all do exactly what they were built to do — they decide *which rows* the model is allowed to fetch. They have nothing to say about what the model then *writes about those rows*.
+
+A customer's own transaction row legitimately includes the counterparty's name, the counterparty's bank, the counterparty's account number — all there because the row wouldn't mean anything without them. The model, doing its job, paraphrases. It mentions the counterparty by name. It speculates about a balance it never actually saw. Your IAM log says *"user A fetched their own transactions."* Nothing in it says *"model emitted user B's account number to user A."*
+
+This is **OWASP LLM Top 10 #2 — Sensitive Information Disclosure** — and it's the reason your compliance team keeps saying *not yet* to the LLM your product team has been demoing internally for six months.
+
+Argo exists to fix that, and only that.
+
+---
+
+## What Argo is
 
 Argo sits between your application and your LLM. For every response the LLM generates, Argo:
 
@@ -13,7 +29,15 @@ Argo sits between your application and your LLM. For every response the LLM gene
 3. **Rewrites the response.** Unauthorized claims are redacted; authorized claims pass through.
 4. **Logs everything.** Every claim, every verdict, every citation is appended to a regulator-readable audit log.
 
-Argo solves exactly **OWASP LLM Top 10 #2 — Sensitive Information Disclosure**. Nothing else.
+Three things keep it adoptable:
+
+- **No model to manage.** The judge is a small Haiku call; everything else is plain Python.
+- **No SaaS.** Self-hosted on your own infrastructure, talking only to your existing Postgres and your existing LLM provider.
+- **No replacement of your stack.** Argo plugs in *after* your IAM/RBAC has done its job — defense-in-depth at the place LLMs actually leak, which is output synthesis time.
+
+If your LLM only ever sees data the calling user is already allowed to see in full, and your responses are short enough that *"don't put counterparty fields in retrieval"* works as a control, you probably don't need Argo yet. Argo is built for the teams whose compliance reviewer has flagged exactly the gap above, and whose existing access-control stack genuinely can't close it.
+
+---
 
 ## Where Argo fits
 
