@@ -6,7 +6,7 @@ separate methods so a deployment can route them to different models —
 or different providers entirely — without code changes.
 
 To plug in your own LLM (self-hosted, AWS Bedrock, vLLM, internal-only
-model), implement the `LlmClient` Protocol and point `ARGO_LLM_CLIENT`
+model), implement the `LlmClient` Protocol and point `LLM_CLIENT`
 at `your_module:YourClass`. See ADAPTERS.md for a worked example.
 """
 
@@ -114,7 +114,7 @@ class LiteLlmClient:
 
 
 # Loaded from settings.llm_client; defaults to LiteLlmClient in this module.
-# Banks override via env var ARGO_LLM_CLIENT="their_module:TheirClient".
+# Banks override via env var LLM_CLIENT="their_module:TheirClient".
 _CLIENT: LlmClient = load_plugin(settings.llm_client)  # type: ignore[assignment]
 
 

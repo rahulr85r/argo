@@ -1,6 +1,6 @@
 # Writing your own adapters
 
-Argo has four pluggable seams. Each is a Python `Protocol`. Replacing one
+Argo has five pluggable seams. Each is a Python `Protocol`. Replacing one
 means writing a class that satisfies the contract and pointing an env var
 at it — no forking, no Argo code changes.
 
@@ -14,12 +14,15 @@ and a worked Okta example end-to-end (because that's the most common
 | `AuditWriter` | `argo.db.audit:PostgresAuditWriter` | You need audit events in Splunk / Datadog / Kafka, not Postgres |
 | `LlmClient` | `argo.llm:LiteLlmClient` | You need a self-hosted model, in-VPC Bedrock, or a non-LiteLLM-supported provider |
 | `Verifier` | `argo.verifier:LlmVerifier` | You want deterministic SQL matching instead of (or before) an LLM call |
+| `TransactionSource` | `argo.db.queries:PostgresTransactionSource` | Your transaction history lives in a core-banking system (Mambu / FIS / Temenos / internal core), not Argo's Postgres |
+
+The five seams are **independent**. Swapping `EntitlementAdapter` to Okta does not require swapping `TransactionSource` — but if your transactions also live outside Argo's DB, you'll want to swap both. The default `LlmVerifier` consumes `TransactionSource` through the plugin loader, so you can keep the LLM-matching verifier and only replace where the rows come from.
 
 ---
 
 ## How plug-in selection works
 
-At startup, Argo reads four env vars. Each one is a `"module.path:ClassName"`
+At startup, Argo reads five env vars. Each one is a `"module.path:ClassName"`
 spec. The class must construct with no arguments — any configuration the
 class needs should come from its own env vars, read in `__init__`.
 
@@ -28,6 +31,7 @@ ENTITLEMENT_ADAPTER=mybank.argo_plugins:OktaEntitlementAdapter
 AUDIT_WRITER=mybank.argo_plugins:SplunkHecAuditWriter
 LLM_CLIENT=mybank.argo_plugins:BedrockClient
 VERIFIER=mybank.argo_plugins:SqlFirstVerifier
+TRANSACTION_SOURCE=mybank.argo_plugins:MambuTransactionSource
 ```
 
 Argo imports the module, looks up the class, and calls `cls()`. That's it.
@@ -400,7 +404,6 @@ Production reasons to replace:
 
 ```python
 from argo.claims import Claim
-from argo.db.queries import get_user_transactions
 from argo.entitlements import ClaimVerdict, VerdictResult
 
 
@@ -409,11 +412,22 @@ class SqlFirstVerifier:
 
     Saves the LLM round-trip for the >80% of claims that match cleanly
     on (amount within $1, date within ±2 days, same counterparty, same direction).
+
+    Transaction rows are pulled from the configured `TransactionSource`,
+    so this verifier works whether the bank uses Argo's Postgres, a Mambu
+    adapter, or anything else implementing that Protocol.
     """
 
     def __init__(self):
-        # Lazy-load the LLM fallback so tests can stub it.
-        self._llm = None
+        self._llm = None         # lazy-loaded LLM fallback
+        self._source = None      # lazy-loaded TransactionSource
+
+    def _get_source(self):
+        if self._source is None:
+            from argo.config import settings
+            from argo.plugins import load_plugin
+            self._source = load_plugin(settings.transaction_source)
+        return self._source
 
     def resolve(self, claims_with_verdicts, user_id):
         out = []
@@ -446,8 +460,147 @@ class SqlFirstVerifier:
 
     def _try_sql_match(self, claim: Claim, user_id: str) -> bool | None:
         """Returns True (match), False (clean mismatch), or None (ambiguous, defer to LLM)."""
-        # ... your deterministic match logic against get_user_transactions(user_id) ...
+        rows = self._get_source().get_user_transactions(user_id)
+        # ... your deterministic match logic against `rows` ...
 ```
+
+---
+
+## 5. `TransactionSource`
+
+```python
+class TransactionSource(Protocol):
+    def get_user_transactions(self, user_id: str) -> list[dict]: ...
+```
+
+Supplies the asking user's transaction history to whichever `Verifier` is
+configured. The default `LlmVerifier` consumes this seam through the
+plugin loader, so the source can be swapped without touching verifier
+logic. Custom verifiers (like the `SqlFirstVerifier` above) should consume
+the same seam — write against `TransactionSource`, not against
+`argo.db.queries.get_user_transactions`, and your verifier becomes
+portable across any bank's data layout.
+
+### Row shape
+
+Each dict in the returned list must contain at least these keys (the
+verifier renders them into its judge prompt):
+
+| Key | Type | Notes |
+|---|---|---|
+| `id` | `str` | Stable per-row identifier; surfaced to the verifier as `matched_tx_id` in audit logs |
+| `account_id` | `str` | The user's account the tx is on |
+| `amount_cents` | `int` | Integer cents — no floats |
+| `direction` | `"OUTBOUND" \| "INBOUND"` | Direction relative to the user |
+| `counterparty_name` | `str \| None` | Human-readable name (vendor or person) |
+| `counterparty_user_id` | `str \| None` | If the counterparty is also an Argo-known user |
+| `memo` | `str \| None` | Free-text memo, if any |
+| `ts` | `datetime` | Transaction timestamp — must have a `.strftime()` method |
+
+Extra keys are allowed and ignored.
+
+### When to write your own
+
+You'll write a custom `TransactionSource` whenever transactions live
+outside Argo's database. The two common cases:
+
+- **Core-banking system:** Mambu, FIS Profile, Temenos T24, an internal
+  GraphQL core. The asking user's recent activity gets paginated out of
+  the core's API.
+- **Data warehouse / lakehouse:** Snowflake / BigQuery / Databricks, where
+  the analytics copy of transactions is the easier read path than the
+  operational store.
+
+### Worked example: Mambu core-banking source
+
+```python
+# mybank/argo_plugins/mambu_source.py
+import os
+import threading
+import time
+from datetime import datetime
+
+import httpx
+
+
+class MambuTransactionSource:
+    """Pulls the asking user's recent transactions from Mambu's REST API.
+
+    Reads `MAMBU_BASE_URL`, `MAMBU_API_KEY`, and (optional)
+    `MAMBU_LOOKBACK_DAYS` (default 90) from env in __init__.
+
+    Caches per-user lists for 30 seconds to absorb the burst within a
+    single chat session — same TTL pattern as DbDerivedAdapter.
+    """
+
+    def __init__(self):
+        self._base = os.environ["MAMBU_BASE_URL"].rstrip("/")
+        self._key = os.environ["MAMBU_API_KEY"]
+        self._lookback = int(os.environ.get("MAMBU_LOOKBACK_DAYS", "90"))
+        self._client = httpx.Client(timeout=5.0)
+        self._cache: dict[str, tuple[float, list[dict]]] = {}
+        self._lock = threading.Lock()
+        self._ttl = 30.0
+
+    def get_user_transactions(self, user_id: str) -> list[dict]:
+        cached = self._cached(user_id)
+        if cached is not None:
+            return cached
+        rows = self._fetch(user_id)
+        self._store(user_id, rows)
+        return rows
+
+    def _cached(self, user_id: str) -> list[dict] | None:
+        now = time.monotonic()
+        with self._lock:
+            entry = self._cache.get(user_id)
+            if entry is None:
+                return None
+            expires, rows = entry
+            if now > expires:
+                del self._cache[user_id]
+                return None
+            return rows
+
+    def _store(self, user_id: str, rows: list[dict]) -> None:
+        with self._lock:
+            self._cache[user_id] = (time.monotonic() + self._ttl, rows)
+
+    def _fetch(self, user_id: str) -> list[dict]:
+        r = self._client.get(
+            f"{self._base}/clients/{user_id}/transactions",
+            params={"lookbackDays": self._lookback},
+            headers={"apikey": self._key, "Accept": "application/json"},
+        )
+        r.raise_for_status()
+        return [self._shape(t) for t in r.json()]
+
+    @staticmethod
+    def _shape(t: dict) -> dict:
+        # Translate Mambu's tx envelope into the row shape the verifier expects.
+        return {
+            "id": t["encodedKey"],
+            "account_id": t["accountKey"],
+            "amount_cents": int(round(float(t["amount"]) * 100)),
+            "direction": "OUTBOUND" if t["type"].endswith("WITHDRAWAL") else "INBOUND",
+            "counterparty_name": t.get("transactionDetails", {}).get("counterpartyName"),
+            "counterparty_user_id": t.get("transactionDetails", {}).get("counterpartyClientKey"),
+            "memo": t.get("notes"),
+            "ts": datetime.fromisoformat(t["creationDate"]),
+        }
+```
+
+Point Argo at it:
+
+```bash
+TRANSACTION_SOURCE=mybank.argo_plugins.mambu_source:MambuTransactionSource
+MAMBU_BASE_URL=https://mybank.sandbox.mambu.com/api
+MAMBU_API_KEY=...
+MAMBU_LOOKBACK_DAYS=90
+```
+
+The verifier doesn't care that the rows came from Mambu instead of
+Postgres. Match logic, prompt shape, and audit output are unchanged.
 
 ---
 

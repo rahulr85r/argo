@@ -36,7 +36,6 @@ from typing import Any, Protocol
 from pydantic import ValidationError
 
 from argo.claims import Claim
-from argo.db.queries import get_user_transactions
 from argo.entitlements import ClaimVerdict, VerdictResult
 from argo.llm import call_judge_model
 
@@ -63,6 +62,23 @@ class Verifier(Protocol):
     ) -> list[tuple[Claim, VerdictResult]]: ...
 
 
+class TransactionSource(Protocol):
+    """The seam every transaction-history source must implement.
+
+    Supplies the asking user's transaction rows to the source-span verifier.
+    The default `PostgresTransactionSource` reads from Argo's own tables; a
+    bank whose transactions live in a core-banking system (Mambu, FIS,
+    Temenos, etc.) writes a custom one and points env var `TRANSACTION_SOURCE`
+    at it. The verifier's matching logic stays unchanged either way.
+
+    Row dict shape (consumed by `_render_user_txs`):
+      id, account_id, amount_cents, direction, counterparty_name,
+      counterparty_user_id, memo, ts (datetime)
+    """
+
+    def get_user_transactions(self, user_id: str) -> list[dict]: ...
+
+
 @dataclass(frozen=True)
 class VerifierMatch:
     """A single claim's verification outcome, surfaced to the rewriter and audit log."""
@@ -76,9 +92,9 @@ def _money(cents: int) -> str:
     return f"${cents / 100:,.2f}"
 
 
-def _render_user_txs(user_id: str) -> tuple[str, dict[str, dict]]:
+def _render_user_txs(user_id: str, source: TransactionSource) -> tuple[str, dict[str, dict]]:
     """Returns (formatted-prompt-block, tx_id→row map for audit lookup)."""
-    rows = get_user_transactions(user_id)
+    rows = source.get_user_transactions(user_id)
     lines: list[str] = []
     by_id: dict[str, dict] = {}
     for r in rows:
@@ -154,7 +170,7 @@ def _parse_results(raw: str, n_expected: int) -> list[dict[str, Any]]:
 
 
 def verify_transaction_claims(
-    claims: list[Claim], asking_user_id: str
+    claims: list[Claim], asking_user_id: str, source: TransactionSource
 ) -> list[VerifierMatch]:
     """Resolve every NEEDS_SOURCE_CHECK claim in one batched Haiku call.
 
@@ -162,12 +178,16 @@ def verify_transaction_claims(
     entitlement adapter flagged for verification. Non-transaction claims
     have nothing to verify and should not reach here.
 
+    `source` supplies the asking user's transaction history. The default
+    `PostgresTransactionSource` reads from Argo's own DB; a bank can swap
+    in a core-banking adapter without touching this function.
+
     Empty input returns an empty list (no LLM call).
     """
     if not claims:
         return []
 
-    tx_block, _ = _render_user_txs(asking_user_id)
+    tx_block, _ = _render_user_txs(asking_user_id, source)
     if not tx_block.strip():
         tx_block = "  (no transactions on this user's accounts)"
 
@@ -215,7 +235,24 @@ class LlmVerifier:
     Resolves every NEEDS_SOURCE_CHECK claim in one judge round-trip; other
     verdicts pass through. Empty inputs are a no-op (no LLM call), so the
     common case of "all claims are ALLOW or BLOCK already" costs nothing.
+
+    Transaction history is fetched through a separately pluggable
+    `TransactionSource` (env var `TRANSACTION_SOURCE`), so a bank with rows
+    in a core-banking system can keep this matching logic but swap where the
+    data comes from. The source is resolved lazily on first `.resolve()`.
     """
+
+    def __init__(self) -> None:
+        self._source: TransactionSource | None = None
+
+    def _get_source(self) -> TransactionSource:
+        if self._source is None:
+            from argo.config import settings
+            from argo.plugins import load_plugin
+
+            self._source = load_plugin(settings.transaction_source)  # type: ignore[assignment]
+        assert self._source is not None
+        return self._source
 
     def resolve(
         self,
@@ -232,7 +269,7 @@ class LlmVerifier:
         if not to_verify_claims:
             return list(claims_with_verdicts)
 
-        matches = verify_transaction_claims(to_verify_claims, user_id)
+        matches = verify_transaction_claims(to_verify_claims, user_id, self._get_source())
 
         out = list(claims_with_verdicts)
         for idx, m in zip(to_verify_indices, matches, strict=True):

@@ -9,7 +9,7 @@ the named class must construct with zero arguments. If a plugin needs
 configuration, it should read its own env vars in __init__.
 
 Example:
-    ARGO_ENTITLEMENT_ADAPTER=mybank.argo_okta:OktaAdapter
+    ENTITLEMENT_ADAPTER=mybank.argo_okta:OktaAdapter
     → import mybank.argo_okta, instantiate OktaAdapter()
 
 The deliberate simplicity here is so plugins distribute as ordinary pip

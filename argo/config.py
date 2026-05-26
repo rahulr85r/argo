@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     audit_writer: str = "argo.db.audit:PostgresAuditWriter"
     llm_client: str = "argo.llm:LiteLlmClient"
     verifier: str = "argo.verifier:LlmVerifier"
+    transaction_source: str = "argo.db.queries:PostgresTransactionSource"
 
     @property
     def database_url(self) -> str:

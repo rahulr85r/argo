@@ -6,7 +6,7 @@ production deployments typically swap in a writer that ships events to
 the bank's SIEM (Splunk HEC, Datadog Logs, Kafka, etc.).
 
 To plug in your own writer, implement the `AuditWriter` Protocol and
-point `ARGO_AUDIT_WRITER` at `your_module:YourClass`. See ADAPTERS.md.
+point `AUDIT_WRITER` at `your_module:YourClass`. See ADAPTERS.md.
 """
 
 from __future__ import annotations

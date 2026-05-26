@@ -18,8 +18,12 @@ import sys
 from pathlib import Path
 
 from argo.claims import Claim
+from argo.db.queries import PostgresTransactionSource
 from argo.entitlements import ClaimVerdict
 from argo.verifier import verify_transaction_claims
+
+
+TX_SOURCE = PostgresTransactionSource()
 
 
 REPO = Path(__file__).resolve().parent.parent
@@ -74,7 +78,7 @@ def main() -> int:
         claims = [Claim.model_validate(ex["expected_claims"][i]) for i, _ in items]
         expecteds = [v for _, v in items]
 
-        results = verify_transaction_claims(claims, ex["user_id"])
+        results = verify_transaction_claims(claims, ex["user_id"], TX_SOURCE)
 
         for (i, expected), claim, result in zip(items, claims, results, strict=True):
             total += 1

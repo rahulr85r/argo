@@ -117,3 +117,16 @@ def get_user_transactions(user_id: str) -> list[dict]:
             (user_id,),
         )
         return cur.fetchall()
+
+
+class PostgresTransactionSource:
+    """Default `TransactionSource` — reads from Argo's own `transactions` table.
+
+    The verifier owns the matching logic; this class owns the fetch. Banks
+    whose transactions live elsewhere (Mambu, FIS, Temenos, an internal
+    GraphQL core, etc.) write their own class with the same single method
+    and point env var `TRANSACTION_SOURCE` at it.
+    """
+
+    def get_user_transactions(self, user_id: str) -> list[dict]:
+        return get_user_transactions(user_id)

@@ -78,7 +78,7 @@ class ArgoChatResponse(BaseModel):
 
 
 # Module-level adapter so any in-process cache survives across requests.
-# The class is selected at startup by ARGO_ENTITLEMENT_ADAPTER; defaults
+# The class is selected at startup by ENTITLEMENT_ADAPTER; defaults
 # to argo.entitlements:DbDerivedAdapter. See ADAPTERS.md for swap-in.
 _ENTITLEMENT_ADAPTER: EntitlementAdapter = load_plugin(settings.entitlement_adapter)  # type: ignore[assignment]
 
