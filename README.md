@@ -4,6 +4,8 @@
 
 ### Argo is an open-source runtime gate that checks every LLM response against the asking user's entitlements, redacts what they shouldn't see, and writes a regulator-readable audit row for every claim. Self-hosted. No SaaS. Drops in after your existing IAM.
 
+![Argo: same prompt, same LLM — counterparty PII redacted, hallucinated balance blocked, every claim audited](docs/argo-comparison.svg)
+
 **Status:** Phase 0 — pre-build, active development. Not production-ready.
 
 ---

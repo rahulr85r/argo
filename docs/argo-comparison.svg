@@ -1,0 +1,171 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 820" width="1400" height="820" font-family="ui-monospace, 'SF Mono', Menlo, Monaco, Consolas, 'Liberation Mono', monospace">
+  <defs>
+    <style>
+      .title        { font-size: 22px; font-weight: 700; fill: #e6e6e6; }
+      .subtitle     { font-size: 14px; fill: #8b8b8b; }
+      .panel-header { font-size: 15px; font-weight: 700; }
+      .label        { font-size: 11px; fill: #707070; letter-spacing: 0.5px; }
+      .prompt       { font-size: 13px; fill: #5dade2; font-weight: 600; }
+      .term         { font-size: 13px; fill: #d4d4d4; }
+      .dim          { font-size: 13px; fill: #707070; }
+      .leak         { font-size: 13px; fill: #ff8a80; font-weight: 600; }
+      .leak-bg      { fill: #3a1a1a; }
+      .halluc       { font-size: 13px; fill: #ffb86c; font-weight: 600; }
+      .halluc-bg    { fill: #3a2a14; }
+      .redacted     { font-size: 13px; fill: #69db7c; font-weight: 600; }
+      .audit-key    { font-size: 12px; fill: #b0b0b0; }
+      .audit-block  { font-size: 11px; fill: #ff8a80; font-weight: 700; letter-spacing: 0.5px; }
+      .audit-allow  { font-size: 11px; fill: #69db7c; font-weight: 700; letter-spacing: 0.5px; }
+      .audit-reason { font-size: 11px; fill: #707070; }
+      .footer-big   { font-size: 18px; font-weight: 700; fill: #e6e6e6; }
+      .footer-sub   { font-size: 13px; fill: #888; }
+      .ok           { fill: #69db7c; }
+      .bad          { fill: #ff8a80; }
+    </style>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1400" height="820" fill="#161616"/>
+
+  <!-- Title -->
+  <text x="700" y="44" text-anchor="middle" class="title">Argo — same prompt, same LLM, with vs without the gate</text>
+  <text x="700" y="70" text-anchor="middle" class="subtitle">user_a asks about their own transactions &#8211; the counterparty fields on those rows are the leak surface</text>
+
+  <!-- ============================================================== -->
+  <!-- LEFT PANEL — Without Argo                                      -->
+  <!-- ============================================================== -->
+  <rect x="40" y="100" width="650" height="620" rx="10" fill="#0d0d0d" stroke="#2a2a2a" stroke-width="1"/>
+  <circle cx="62" cy="124" r="6" fill="#ff5f56"/>
+  <circle cx="82" cy="124" r="6" fill="#ffbd2e"/>
+  <circle cx="102" cy="124" r="6" fill="#27c93f"/>
+  <text x="670" y="129" text-anchor="end" class="bad panel-header">&#10007;  Without Argo</text>
+  <line x1="56" y1="148" x2="674" y2="148" stroke="#1f1f1f" stroke-width="1"/>
+
+  <!-- User turn -->
+  <text x="60" y="178" class="label">USER &#8226; user_a</text>
+  <text x="60" y="202" class="prompt">&gt;</text>
+  <text x="78" y="202" class="term">Who did I send money to last week?</text>
+
+  <line x1="56" y1="226" x2="674" y2="226" stroke="#1f1f1f" stroke-width="1"/>
+
+  <!-- Assistant turn -->
+  <text x="60" y="252" class="label">ASSISTANT</text>
+
+  <!-- Line 1 -->
+  <text x="60" y="282" class="term">You sent $500 to </text>
+  <rect x="208" y="269" width="282" height="20" rx="3" class="leak-bg"/>
+  <text x="214" y="282" class="leak">Charlie Rivera (Wells Fargo, &#8230;4827)</text>
+  <text x="492" y="282" class="term"> on</text>
+
+  <text x="60" y="304" class="term">May 18. Charlie&#8217;s checking balance is currently </text>
+  <rect x="438" y="291" width="74" height="20" rx="3" class="halluc-bg"/>
+  <text x="444" y="304" class="halluc">$42,318</text>
+  <text x="513" y="304" class="term">.</text>
+
+  <!-- spacer -->
+  <text x="60" y="338" class="term">You also sent $1,200 to </text>
+  <rect x="252" y="325" width="265" height="20" rx="3" class="leak-bg"/>
+  <text x="258" y="338" class="leak">Sarah Lee (Chase, &#8230;9912)</text>
+  <text x="519" y="338" class="term"> on May</text>
+
+  <text x="60" y="360" class="term">22 &#8212; the rent payment you set up earlier this month.</text>
+
+  <!-- callouts -->
+  <line x1="56" y1="406" x2="674" y2="406" stroke="#1f1f1f" stroke-width="1"/>
+  <text x="60" y="432" class="label">WHAT JUST HAPPENED</text>
+
+  <circle cx="68" cy="460" r="4" class="bad"/>
+  <text x="82" y="464" class="term">Counterparty PII (name, bank, account number) emitted on</text>
+  <text x="82" y="482" class="dim">a row user_a is legitimately allowed to see.</text>
+
+  <circle cx="68" cy="510" r="4" class="bad"/>
+  <text x="82" y="514" class="term">Hallucinated balance for Charlie &#8212; never in retrieved context.</text>
+
+  <circle cx="68" cy="558" r="4" class="bad"/>
+  <text x="82" y="562" class="term">IAM log says &#8220;user_a fetched their own transactions.&#8221;</text>
+  <text x="82" y="580" class="dim">Nothing in it records what the model said about them.</text>
+
+  <text x="60" y="640" class="dim" font-size="12">OWASP LLM Top 10 &#8470;2 &#8212; Sensitive Information Disclosure.</text>
+  <text x="60" y="664" class="dim" font-size="12">Your compliance reviewer&#8217;s veto, in one screenshot.</text>
+
+  <!-- ============================================================== -->
+  <!-- RIGHT PANEL — With Argo                                        -->
+  <!-- ============================================================== -->
+  <rect x="710" y="100" width="650" height="620" rx="10" fill="#0d0d0d" stroke="#2a2a2a" stroke-width="1"/>
+  <circle cx="732" cy="124" r="6" fill="#ff5f56"/>
+  <circle cx="752" cy="124" r="6" fill="#ffbd2e"/>
+  <circle cx="772" cy="124" r="6" fill="#27c93f"/>
+  <text x="1340" y="129" text-anchor="end" class="ok panel-header">&#10003;  With Argo</text>
+  <line x1="726" y1="148" x2="1344" y2="148" stroke="#1f1f1f" stroke-width="1"/>
+
+  <!-- User turn -->
+  <text x="730" y="178" class="label">USER &#8226; user_a</text>
+  <text x="730" y="202" class="prompt">&gt;</text>
+  <text x="748" y="202" class="term">Who did I send money to last week?</text>
+
+  <line x1="726" y1="226" x2="1344" y2="226" stroke="#1f1f1f" stroke-width="1"/>
+
+  <!-- Assistant turn (gated) -->
+  <text x="730" y="252" class="label">ASSISTANT &#8226; gated by Argo</text>
+
+  <text x="730" y="282" class="term">You sent $500 to </text>
+  <text x="878" y="282" class="redacted">[redacted]</text>
+  <text x="956" y="282" class="term"> on May 18.</text>
+
+  <text x="730" y="316" class="term">You also sent $1,200 to </text>
+  <text x="922" y="316" class="redacted">[redacted]</text>
+  <text x="1000" y="316" class="term"> on May 22 &#8212; the</text>
+  <text x="730" y="338" class="term">rent payment you set up earlier this month.</text>
+
+  <!-- Audit subsection -->
+  <line x1="726" y1="386" x2="1344" y2="386" stroke="#1f1f1f" stroke-width="1"/>
+  <text x="730" y="412" class="label">AUDIT &#8226; per-claim verdicts, persisted to audit_events</text>
+
+  <!-- Audit rows -->
+  <g transform="translate(730, 436)">
+    <!-- row 1 -->
+    <rect x="0" y="0" width="56" height="18" rx="3" fill="#3a1a1a"/>
+    <text x="28" y="13" text-anchor="middle" class="audit-block">BLOCK</text>
+    <text x="68" y="13" class="audit-key">counterparty.name</text>
+    <text x="290" y="13" class="audit-reason">field not in whitelist</text>
+
+    <!-- row 2 -->
+    <rect x="0" y="28" width="56" height="18" rx="3" fill="#3a1a1a"/>
+    <text x="28" y="41" text-anchor="middle" class="audit-block">BLOCK</text>
+    <text x="68" y="41" class="audit-key">counterparty.bank</text>
+    <text x="290" y="41" class="audit-reason">field not in whitelist</text>
+
+    <!-- row 3 -->
+    <rect x="0" y="56" width="56" height="18" rx="3" fill="#3a1a1a"/>
+    <text x="28" y="69" text-anchor="middle" class="audit-block">BLOCK</text>
+    <text x="68" y="69" class="audit-key">counterparty.account_number</text>
+    <text x="290" y="69" class="audit-reason">field not in whitelist</text>
+
+    <!-- row 4 -->
+    <rect x="0" y="84" width="56" height="18" rx="3" fill="#3a2a14"/>
+    <text x="28" y="97" text-anchor="middle" class="audit-block" fill="#ffb86c">BLOCK</text>
+    <text x="68" y="97" class="audit-key">counterparty.balance</text>
+    <text x="290" y="97" class="audit-reason">no source span &#8212; hallucinated</text>
+
+    <!-- row 5 -->
+    <rect x="0" y="112" width="56" height="18" rx="3" fill="#1a3a22"/>
+    <text x="28" y="125" text-anchor="middle" class="audit-allow">ALLOW</text>
+    <text x="68" y="125" class="audit-key">own.transaction.amount</text>
+    <text x="290" y="125" class="audit-reason">user owns the source row</text>
+
+    <!-- row 6 -->
+    <rect x="0" y="140" width="56" height="18" rx="3" fill="#1a3a22"/>
+    <text x="28" y="153" text-anchor="middle" class="audit-allow">ALLOW</text>
+    <text x="68" y="153" class="audit-key">own.transaction.date</text>
+    <text x="290" y="153" class="audit-reason">user owns the source row</text>
+  </g>
+
+  <text x="730" y="640" class="dim" font-size="12">Whitelist policy: counterparty_fields = &#123;transaction, account_ownership, aggregate&#125;.</text>
+  <text x="730" y="664" class="dim" font-size="12">Everything else is denied by default &#8212; one screen for a reviewer to audit.</text>
+
+  <!-- ============================================================== -->
+  <!-- Footer                                                          -->
+  <!-- ============================================================== -->
+  <text x="700" y="770" text-anchor="middle" class="footer-big">Same prompt. Same LLM. Argo gates output and audits every claim.</text>
+  <text x="700" y="794" text-anchor="middle" class="footer-sub">Demo data &#8211; user_a, demo query Q3. Reproduce locally with <tspan font-family="ui-monospace, monospace" fill="#a0a0a0">docker compose up</tspan> and the split-screen UI.</text>
+</svg>
