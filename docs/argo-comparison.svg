@@ -27,8 +27,8 @@
   <rect width="1400" height="820" fill="#161616"/>
 
   <!-- Title -->
-  <text x="700" y="44" text-anchor="middle" class="title">Argo — same conversation, with vs without the gate</text>
-  <text x="700" y="70" text-anchor="middle" class="subtitle">Rahul asks the bank&#8217;s assistant about a transfer to John. John&#8217;s balance is the counterparty PII.</text>
+  <text x="700" y="44" text-anchor="middle" class="title">Argo &#8212; same conversation, with vs without the gate</text>
+  <text x="700" y="70" text-anchor="middle" class="subtitle">Rahul asks whether his own transfer cleared. The counterparty&#8217;s account number is on that row.</text>
 
   <!-- ============================================================== -->
   <!-- LEFT PANEL — Without Argo                                      -->
@@ -43,17 +43,16 @@
   <!-- User bubble (Rahul) — right aligned -->
   <text x="670" y="178" text-anchor="end" class="label">RAHUL</text>
   <rect x="290" y="188" width="380" height="74" rx="14" fill="#1d4ed8"/>
-  <text x="304" y="214" class="bubble-user">Hey, John told me he hasn&#8217;t received my $200</text>
-  <text x="304" y="236" class="bubble-user">transfer and his balance is still $1,200.</text>
+  <text x="304" y="214" class="bubble-user">Did my $200 transfer to John go</text>
+  <text x="304" y="236" class="bubble-user">through this morning?</text>
 
   <!-- Assistant bubble (leaky) — left aligned -->
   <text x="60" y="292" class="label">BANK ASSISTANT</text>
   <rect x="60" y="302" width="400" height="98" rx="14" fill="#262a33"/>
-  <text x="74" y="328" class="bubble-bot">I can confirm John has received your transfer.</text>
-  <rect x="70" y="338" width="200" height="22" rx="3" fill="#3a1a1a"/>
-  <text x="74" y="354" class="leak-text">His balance is now $1,200</text>
-  <text x="270" y="354" class="bubble-bot">, reflecting the $200</text>
-  <text x="74" y="376" class="bubble-bot">you sent.</text>
+  <text x="74" y="328" class="bubble-bot">Yes &#8212; your $200 transfer to John went</text>
+  <text x="74" y="350" class="bubble-bot">through this morning. It landed in his</text>
+  <rect x="70" y="358" width="250" height="22" rx="3" fill="#3a1a1a"/>
+  <text x="74" y="374" class="leak-text">account &#8226;&#8226;&#8226;&#8226;7782 at First National.</text>
 
   <!-- Divider -->
   <line x1="56" y1="428" x2="674" y2="428" stroke="#1f1f1f" stroke-width="1"/>
@@ -62,12 +61,12 @@
   <text x="60" y="454" class="callout-head">WHAT JUST LEAKED</text>
 
   <circle cx="68" cy="486" r="4" class="bad"/>
-  <text x="82" y="490" class="callout-body">John&#8217;s current balance &#8212; counterparty PII on a row</text>
-  <text x="82" y="510" class="callout-body" fill="#707070">Rahul is legitimately allowed to see (the transfer row).</text>
+  <text x="82" y="490" class="callout-body">John&#8217;s account number &#8212; counterparty PII sitting on</text>
+  <text x="82" y="510" class="callout-body" fill="#707070">Rahul&#8217;s own transfer row, which he&#8217;s allowed to fetch.</text>
 
   <circle cx="68" cy="544" r="4" class="bad"/>
-  <text x="82" y="548" class="callout-body">No IAM check fires &#8212; the LLM was given the row and</text>
-  <text x="82" y="568" class="callout-body" fill="#707070">decided, at synthesis time, to confirm the balance.</text>
+  <text x="82" y="548" class="callout-body">No IAM check fires &#8212; the row was returned correctly;</text>
+  <text x="82" y="568" class="callout-body" fill="#707070">the LLM chose, at synthesis time, to read it aloud.</text>
 
   <text x="60" y="638" class="callout-body" fill="#707070" font-size="12">OWASP LLM Top 10 &#8470;2 &#8212; Sensitive Information Disclosure.</text>
   <text x="60" y="658" class="callout-body" fill="#707070" font-size="12">Your compliance reviewer&#8217;s veto, in one screenshot.</text>
@@ -85,15 +84,15 @@
   <!-- User bubble (Rahul) — same prompt -->
   <text x="1340" y="178" text-anchor="end" class="label">RAHUL</text>
   <rect x="960" y="188" width="380" height="74" rx="14" fill="#1d4ed8"/>
-  <text x="974" y="214" class="bubble-user">Hey, John told me he hasn&#8217;t received my $200</text>
-  <text x="974" y="236" class="bubble-user">transfer and his balance is still $1,200.</text>
+  <text x="974" y="214" class="bubble-user">Did my $200 transfer to John go</text>
+  <text x="974" y="236" class="bubble-user">through this morning?</text>
 
   <!-- Assistant bubble (gated) — left aligned -->
   <text x="730" y="292" class="label">BANK ASSISTANT  <tspan class="label-sub">&#8226; gated by Argo</tspan></text>
   <rect x="730" y="302" width="400" height="98" rx="14" fill="#262a33"/>
-  <text x="744" y="328" class="bubble-bot-soft">I can&#8217;t confirm John&#8217;s balance &#8212; that&#8217;s only</text>
-  <text x="744" y="350" class="bubble-bot-soft">visible to John. But I can confirm your $200</text>
-  <text x="744" y="372" class="gated-text">transfer to him has completed.</text>
+  <text x="744" y="328" class="bubble-bot-soft">Yes &#8212; your $200 transfer to John went</text>
+  <text x="744" y="350" class="bubble-bot-soft">through this morning. I can&#8217;t share his</text>
+  <text x="744" y="372" class="gated-text">account details, but your payment is confirmed.</text>
 
   <!-- Divider -->
   <line x1="726" y1="428" x2="1344" y2="428" stroke="#1f1f1f" stroke-width="1"/>
@@ -105,30 +104,30 @@
     <!-- row 1 -->
     <rect x="0" y="0" width="56" height="22" rx="3" fill="#3a1a1a"/>
     <text x="28" y="15" text-anchor="middle" class="audit-block">BLOCK</text>
-    <text x="68" y="15" class="audit-key">counterparty.balance</text>
-    <text x="280" y="15" class="audit-reason">field not in whitelist</text>
+    <text x="68" y="15" class="audit-key">counterparty.account_number</text>
+    <text x="320" y="15" class="audit-reason">field not in whitelist</text>
 
     <!-- row 2 -->
     <rect x="0" y="34" width="56" height="22" rx="3" fill="#1a3a22"/>
     <text x="28" y="49" text-anchor="middle" class="audit-allow">ALLOW</text>
     <text x="68" y="49" class="audit-key">own.transaction.status</text>
-    <text x="280" y="49" class="audit-reason">Rahul owns the source row</text>
+    <text x="320" y="49" class="audit-reason">Rahul owns the source row</text>
 
     <!-- row 3 -->
     <rect x="0" y="68" width="56" height="22" rx="3" fill="#1a3a22"/>
     <text x="28" y="83" text-anchor="middle" class="audit-allow">ALLOW</text>
     <text x="68" y="83" class="audit-key">own.transaction.amount</text>
-    <text x="280" y="83" class="audit-reason">Rahul owns the source row</text>
+    <text x="320" y="83" class="audit-reason">Rahul owns the source row</text>
 
     <!-- row 4 -->
     <rect x="0" y="102" width="56" height="22" rx="3" fill="#1a3a22"/>
     <text x="28" y="117" text-anchor="middle" class="audit-allow">ALLOW</text>
     <text x="68" y="117" class="audit-key">own.transaction.recipient</text>
-    <text x="280" y="117" class="audit-reason">Rahul owns the source row</text>
+    <text x="320" y="117" class="audit-reason">Rahul owns the source row</text>
   </g>
 
   <text x="730" y="638" class="callout-body" fill="#707070" font-size="12">Whitelist policy: counterparty_fields = &#123;transaction, account_ownership, aggregate&#125;.</text>
-  <text x="730" y="658" class="callout-body" fill="#707070" font-size="12">counterparty.balance isn&#8217;t in the set &#8212; blocked, regardless of what the LLM tried to say.</text>
+  <text x="730" y="658" class="callout-body" fill="#707070" font-size="12">counterparty.account_number isn&#8217;t in the set &#8212; blocked, regardless of what the LLM tried to say.</text>
 
   <!-- ============================================================== -->
   <!-- Footer                                                          -->

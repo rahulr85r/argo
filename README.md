@@ -4,7 +4,7 @@
 
 ### Argo is an open-source runtime gate that checks every LLM response against the asking user's entitlements, redacts what they shouldn't see, and writes a regulator-readable audit row for every claim. Self-hosted. No SaaS. Drops in after your existing IAM.
 
-![Argo: same conversation about a $200 transfer — without Argo the LLM confirms John's balance to Rahul; with Argo only Rahul's own transfer is confirmed](docs/argo-comparison.svg)
+![Argo: same conversation about a $200 transfer — without Argo the LLM reads out John's account number to Rahul; with Argo only Rahul's own transfer is confirmed](docs/argo-comparison.svg)
 
 **Status:** Phase 0 — pre-build, active development. Not production-ready.
 
@@ -49,7 +49,7 @@ Three failure modes upstream gates can't catch on their own:
 
 1. **Counterparty data on legitimately-returned rows.** A user's own transaction row correctly includes the counterparty's name and amount. Whether the model paraphrases over field scope — e.g., reveals a counterparty's account number that happened to be on the row — is a generation-time decision. No upstream gate can predict what the model will say about data it was correctly given.
 2. **Hallucinations.** The source-span verifier rejects any claim whose support isn't in retrieved context. This check is **policy-independent** — it answers "is this claim grounded?", not "is this claim allowed?" — so fabricated facts about *any* entity fail closed, regardless of entitlement configuration.
-3. **Output-level audit.** IAM logs say "user A fetched their transactions." They don't say "model emitted counterparty's balance, redacted, reason=`field-not-whitelisted`." Argo's audit log is at the claim level.
+3. **Output-level audit.** IAM logs say "user A fetched their transactions." They don't say "model emitted counterparty's account number, redacted, reason=`field-not-whitelisted`." Argo's audit log is at the claim level.
 
 ### Design intent: whitelist, not blacklist
 

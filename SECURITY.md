@@ -33,8 +33,8 @@ tool gates, RBAC) structurally cannot:
    entitlement configuration.
 
 3. **No output-level audit.** Your IAM logs say "user A fetched their
-   transactions." They do not say "the model emitted B's balance and the gate
-   redacted it for reason X." Argo's audit log is at the claim level.
+   transactions." They do not say "the model emitted B's account number and the
+   gate redacted it for reason X." Argo's audit log is at the claim level.
 
 ## 2. What Argo does NOT defend against
 
