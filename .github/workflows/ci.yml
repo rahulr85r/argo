@@ -127,6 +127,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The default builder uses the `docker` driver, which cannot export a
+      # cache ("Cache export is not supported for the docker driver"). This
+      # sets up a docker-container driver, which supports both the GHA cache
+      # and `load: true`.
+      - uses: docker/setup-buildx-action@v3
+
       - name: Build gateway image
         uses: docker/build-push-action@v6
         with:
