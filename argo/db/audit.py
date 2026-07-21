@@ -74,7 +74,7 @@ class AuditWriter(Protocol):
     Postgres default returns the assigned row id.
     """
 
-    def write(self, event: "AuditEvent") -> int | None: ...
+    def write(self, event: AuditEvent) -> int | None: ...
 
 
 class PostgresAuditWriter:
@@ -86,7 +86,7 @@ class PostgresAuditWriter:
     truth in a production deployment.
     """
 
-    def write(self, event: "AuditEvent") -> int:
+    def write(self, event: AuditEvent) -> int:
         claim_audit_json = json.dumps([c.model_dump() for c in event.claim_audit])
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(
@@ -111,6 +111,33 @@ class PostgresAuditWriter:
             row = cur.fetchone()
             conn.commit()
             return int(row["id"])
+
+
+class InMemoryAuditWriter:
+    """`AuditWriter` that keeps events in a list. Tests and offline dev only.
+
+    Two things it makes testable that the Postgres writer cannot:
+
+      - **What Argo actually recorded.** Assertions can read `.events`
+        directly instead of round-tripping through SQL, so the per-claim
+        audit trail is checkable without a database.
+      - **Audit-destination failure.** Construct with `fail=True` and every
+        `write()` raises, which is how the pipeline's "audit write must never
+        break the user's response" guarantee gets exercised.
+
+    Not for production: events are lost on restart and never leave the
+    process. Point `AUDIT_WRITER` at a durable writer for real deployments.
+    """
+
+    def __init__(self, *, fail: bool = False) -> None:
+        self.events: list[AuditEvent] = []
+        self.fail = fail
+
+    def write(self, event: AuditEvent) -> int:
+        if self.fail:
+            raise RuntimeError("InMemoryAuditWriter: simulated audit-destination failure")
+        self.events.append(event)
+        return len(self.events)
 
 
 def write_audit_event(event: AuditEvent) -> int | None:

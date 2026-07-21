@@ -497,6 +497,56 @@ def seed_counterparty_set(user_id: str) -> set[str]:
     return cps
 
 
+# ----- In-memory TransactionSource for tests / dev REPL -----------------
+
+
+def _seed_tx_rows() -> list[dict]:
+    """Every seeded transaction as a `TransactionSource` row dict.
+
+    Ids match what `seed_if_empty()` assigns in Postgres (`tx_0001`, …),
+    so a claim verified against the seed source cites the same tx id it
+    would cite against the database.
+    """
+    display = {a["id"]: a["display_name"] for a in ACCOUNTS}
+    return [
+        {
+            "id": f"tx_{i:04d}",
+            "account_id": acct,
+            "account_display": display.get(acct, acct),
+            "amount_cents": cents,
+            "direction": direction,
+            "counterparty_name": cp_name,
+            "counterparty_user_id": cp_user,
+            "memo": memo,
+            "ts": _ts(ts),
+        }
+        for i, (acct, cents, direction, cp_name, cp_user, memo, ts)
+        in enumerate(_TX_DATA, start=1)
+    ]
+
+
+class SeedTransactionSource:
+    """In-memory `TransactionSource` over the seed data. Test/dev only.
+
+    The counterpart to `SeedDerivedAdapter`: lets the source-span verifier
+    run its full matching logic — including the batched judge prompt — with
+    no Postgres. Row shape and ordering (ts ascending, then id) mirror
+    `PostgresTransactionSource` so the verifier cannot tell them apart.
+
+    Like `SeedDerivedAdapter`, importing this outside `tests/` or a REPL is
+    almost certainly a mistake; production wires the Postgres source.
+    """
+
+    def __init__(self) -> None:
+        self._rows = _seed_tx_rows()
+
+    def get_user_transactions(self, user_id: str) -> list[dict]:
+        owned = accounts_for(user_id)
+        rows = [r for r in self._rows if r["account_id"] in owned]
+        rows.sort(key=lambda r: (r["ts"], r["id"]))
+        return rows
+
+
 # ----- Insert into Postgres ---------------------------------------------
 
 def seed_if_empty() -> None:
