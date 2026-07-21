@@ -24,6 +24,14 @@ class Settings(BaseSettings):
     # production deployments will override this to a bank-owned file.
     policy_path: str = ""  # "" → use argo/policy/banking.toml
 
+    # Reference instant for time-windowed policy rules (`recent_payment`).
+    #   ""      → wall clock (the production default)
+    #   "seed"  → pin to the bundled demo dataset, so it never ages out
+    #   ISO-8601 timestamp → an explicit pin
+    # See argo/clock.py. Pinning freezes the counterparty graph — demo and
+    # test affordance only, never a production posture.
+    reference_time: str = ""
+
     # Pluggable Protocol implementations. Each is "module.path:ClassName".
     # Override via env var to plug in a bank-specific implementation
     # without forking. See ADAPTERS.md for the contracts.

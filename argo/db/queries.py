@@ -1,5 +1,8 @@
 """Read-side helpers for the demo domain."""
 
+from datetime import timedelta
+
+from argo.clock import reference_now
 from argo.db import get_conn
 
 
@@ -61,7 +64,22 @@ def get_account_ids_for_user(user_id: str) -> list[str]:
 def get_recent_payment_counterparties(user_id: str, lookback_days: int) -> list[str]:
     """Rule `recent_payment`: distinct user_ids appearing as counterparty on
     a tx posted to any of the asking user's accounts in the lookback window.
+
+    The window is anchored to `argo.clock.reference_now()` rather than SQL
+    `NOW()`, so this shares one clock with the in-memory seed evaluator. With
+    `REFERENCE_TIME` unset that is wall-clock UTC — identical to the previous
+    `NOW()` behaviour — but it also lets the bundled demo pin its reference and
+    stop decaying. The cutoff is computed here and passed as a bound parameter,
+    which keeps the two implementations provably equivalent.
+
+    The window is closed at both ends: `[reference - lookback, reference]`.
+    The upper bound is vacuous on wall clock (no transaction is dated in the
+    future) but it is what makes a pinned reference a true *as-of* — replaying
+    an old entitlement decision must not see transactions that had not happened
+    yet at the time being replayed.
     """
+    reference = reference_now()
+    cutoff = reference - timedelta(days=lookback_days)
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
             """
@@ -71,9 +89,10 @@ def get_recent_payment_counterparties(user_id: str, lookback_days: int) -> list[
             WHERE ao.user_id = %(uid)s
               AND t.counterparty_user_id IS NOT NULL
               AND t.counterparty_user_id <> %(uid)s
-              AND t.ts >= NOW() - make_interval(days => %(days)s)
+              AND t.ts >= %(cutoff)s
+              AND t.ts <= %(reference)s
             """,
-            {"uid": user_id, "days": lookback_days},
+            {"uid": user_id, "cutoff": cutoff, "reference": reference},
         )
         return [r["cp_user"] for r in cur.fetchall()]
 

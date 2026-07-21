@@ -21,13 +21,13 @@ Idempotent: only inserts if the users table is empty.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from argo.db import get_conn
 
 
 def _ts(iso: str) -> datetime:
-    return datetime.fromisoformat(iso).replace(tzinfo=timezone.utc)
+    return datetime.fromisoformat(iso).replace(tzinfo=UTC)
 
 
 # ----- Users --------------------------------------------------------------
@@ -426,18 +426,28 @@ _TX_DATA = sorted(_build_transactions(), key=lambda r: (r[6], r[0]))
 # ----- Policy-rule evaluators against the in-memory seed -----------------
 #
 # The SeedDerivedAdapter (test-only) applies the same POLICY rules as
-# production, but against the lists above instead of Postgres. The
-# reference "now" is pinned to one day past the latest tx in the seed so
-# rule evaluation is independent of wall-clock — tests run in 2026 or
-# 2030 see the same counterparty graph.
+# production, but against the lists above instead of Postgres.
+#
+# Both evaluators — this one and the SQL in argo/db/queries.py — anchor
+# their time window to argo.clock.reference_now(). Set REFERENCE_TIME=seed
+# and the two agree exactly; leave it unset and both follow wall clock.
+# They can no longer disagree, which is what let the demo dataset decay
+# out of its own 90-day window unnoticed.
 
 
 def _seed_reference_now() -> datetime:
+    """One day past the newest seeded transaction.
+
+    Pure function of the data above — no clock involved — so importing this
+    module never depends on configuration. `argo.clock` reads it when
+    REFERENCE_TIME=seed, and it follows automatically if the seed changes.
+    """
     latest = max(_ts(ts) for (_a, _c, _d, _cpn, _cpu, _m, ts) in _TX_DATA)
     return latest + timedelta(days=1)
 
 
-_SEED_NOW: datetime = _seed_reference_now()
+#: Public: the instant REFERENCE_TIME=seed resolves to. See argo/clock.py.
+SEED_REFERENCE_TIME: datetime = _seed_reference_now()
 
 
 def accounts_for(user_id: str) -> set[str]:
@@ -445,7 +455,12 @@ def accounts_for(user_id: str) -> set[str]:
 
 
 def _seed_recent_payment(user_id: str, lookback_days: int) -> set[str]:
-    cutoff = _SEED_NOW - timedelta(days=lookback_days)
+    from argo.clock import reference_now
+
+    # Closed at both ends, matching the SQL in argo/db/queries.py — see the
+    # note there on why the upper bound matters for a pinned reference.
+    reference = reference_now()
+    cutoff = reference - timedelta(days=lookback_days)
     owned = accounts_for(user_id)
     return {
         cp_user
@@ -453,7 +468,7 @@ def _seed_recent_payment(user_id: str, lookback_days: int) -> set[str]:
         if acct in owned
         and cp_user is not None
         and cp_user != user_id
-        and _ts(ts) >= cutoff
+        and cutoff <= _ts(ts) <= reference
     }
 
 
