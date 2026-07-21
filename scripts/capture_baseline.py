@@ -13,7 +13,6 @@ import sys
 
 from argo.naive import naive_chat
 
-
 # Q5 uses "email" instead of "address" because the seed data has emails, not
 # addresses. The entitlement lesson is identical — both are personal data that
 # user_a should not see about user_c.

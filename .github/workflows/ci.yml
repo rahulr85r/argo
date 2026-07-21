@@ -1,0 +1,162 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_VERSION: "0.11.30"
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Ruff
+        run: uv run ruff check argo tests scripts
+
+      # banking.toml is parsed and validated at import time, so a malformed
+      # policy file takes the gateway down at startup rather than failing a
+      # request. Catch that here, before it reaches a deploy.
+      - name: Validate policy file
+        run: |
+          uv run python -c "
+          from argo.policy import POLICY
+          assert POLICY.counterparty_fields, 'counterparty_fields is empty'
+          assert POLICY.counterparty_rules, 'counterparty_rules is empty'
+          print('policy OK:', sorted(POLICY.counterparty_fields))
+          print('rules:', [r.type for r in POLICY.counterparty_rules])
+          "
+
+  test:
+    name: Test (offline, py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.11 is the floor declared in pyproject and the Dockerfile's base;
+        # 3.13 is the current stable ceiling. All three verified locally.
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen
+        env:
+          UV_PYTHON: ${{ matrix.python-version }}
+
+      # No TEST_DATABASE_URL and no ANTHROPIC_API_KEY on purpose: this job
+      # proves the suite runs with zero infrastructure and zero credentials.
+      # The `db`-marked tests skip here and run in the `integration` job.
+      - name: Run offline test suite
+        run: uv run pytest -q --strict-markers
+        env:
+          UV_PYTHON: ${{ matrix.python-version }}
+
+  integration:
+    name: Integration (live Postgres)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        # Matches docker-compose.yml so CI and the local demo agree.
+        image: postgres:16
+        env:
+          POSTGRES_DB: argo_test
+          POSTGRES_USER: argo
+          POSTGRES_PASSWORD: argo
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U argo -d argo_test"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 15
+    env:
+      TEST_DATABASE_URL: postgres://argo:argo@127.0.0.1:5432/argo_test
+      # Turns a missing/misconfigured database into a hard failure instead of
+      # a silent skip — see the `live_db` fixture in tests/conftest.py.
+      ARGO_REQUIRE_DB: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      # Exercises DbDerivedAdapter, argo/db/queries.py, PostgresAuditWriter and
+      # PostgresTransactionSource — the production data path, which the offline
+      # suite deliberately substitutes away.
+      - name: Run live-Postgres tests
+        run: uv run pytest -q -m db --strict-markers
+
+  docker:
+    name: Docker build + smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build gateway image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: argo:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Brings up Postgres + gateway exactly as the README's quick start does,
+      # then checks the gateway becomes live. No API key is provided, so this
+      # covers startup, schema bootstrap and seeding — not the LLM path.
+      - name: Compose up
+        run: docker compose up -d --wait --wait-timeout 120
+        env:
+          ANTHROPIC_API_KEY: ""
+
+      - name: Health check
+        run: |
+          curl --fail --silent --show-error --retry 10 --retry-delay 3 \
+            --retry-all-errors http://localhost:8000/health | tee /dev/stderr | grep -q '"ok"'
+
+      - name: Demo UI is served
+        run: curl --fail --silent --show-error http://localhost:8000/ui/ | grep -qi "<html"
+
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose logs --no-color
+
+      - name: Compose down
+        if: always()
+        run: docker compose down -v

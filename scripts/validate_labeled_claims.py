@@ -18,7 +18,6 @@ from pathlib import Path
 
 from argo.claims import Claim
 
-
 LABELED_PATH = Path(__file__).resolve().parent.parent / "eval" / "labeled_claims.json"
 
 

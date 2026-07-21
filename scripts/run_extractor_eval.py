@@ -30,12 +30,11 @@ import argparse
 import json
 import sys
 import time
-from collections import Counter, defaultdict
+from collections import Counter
 from pathlib import Path
 
 from argo.claims import Claim
 from argo.judge import extract_claims_raw
-
 
 REPO = Path(__file__).resolve().parent.parent
 LABELED_PATH = REPO / "eval" / "labeled_claims.json"
@@ -172,7 +171,7 @@ def main() -> int:
             for lab, pred in s["matches"]:
                 print(f"      ✓ {fmt_claim(lab)}")
                 if not _span_overlap(lab.source_span, pred.source_span):
-                    print(f"        span mismatch:")
+                    print("        span mismatch:")
                     print(f"          labeled: {lab.source_span!r}")
                     print(f"          pred:    {pred.source_span!r}")
         for m in s["misses"]:

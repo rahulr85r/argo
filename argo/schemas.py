@@ -26,7 +26,10 @@ class GateRequest(BaseModel):
         ...,
         min_length=1,
         max_length=2000,
-        description="The user's original prompt. Used by the extractor for context and recorded in audit.",
+        description=(
+            "The user's original prompt. Used by the extractor for context "
+            "and recorded in audit."
+        ),
     )
     raw_response: str = Field(
         ...,
@@ -40,5 +43,8 @@ class GateRequest(BaseModel):
     chat_latency_ms: int = Field(
         default=0,
         ge=0,
-        description="Latency of the upstream chat call, if you want it recorded for end-to-end timing.",
+        description=(
+            "Latency of the upstream chat call, if you want it recorded "
+            "for end-to-end timing."
+        ),
     )

@@ -22,7 +22,6 @@ from argo.db.queries import PostgresTransactionSource
 from argo.entitlements import ClaimVerdict
 from argo.verifier import verify_transaction_claims
 
-
 TX_SOURCE = PostgresTransactionSource()
 
 
@@ -76,7 +75,6 @@ def main() -> int:
         ex = LABELED_BY_ID[ex_id]
         items.sort(key=lambda x: x[0])
         claims = [Claim.model_validate(ex["expected_claims"][i]) for i, _ in items]
-        expecteds = [v for _, v in items]
 
         results = verify_transaction_claims(claims, ex["user_id"], TX_SOURCE)
 

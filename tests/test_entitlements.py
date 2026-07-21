@@ -16,12 +16,10 @@ import pytest
 from argo.claims import Claim
 from argo.entitlements import (
     ClaimVerdict,
-    EntitlementBundle,
     SeedDerivedAdapter,
     UnknownUserError,
     check_claim,
 )
-
 
 LABELED = json.loads(
     (Path(__file__).resolve().parent.parent / "eval" / "labeled_claims.json").read_text()
