@@ -163,8 +163,8 @@ The pipeline runs six stages in order. The bundle resolver (stage 0) is the only
 ### Full demo (Docker)
 
 ```bash
-cp .env.example .env          # add your Anthropic API key
-docker compose up -d --build  # Postgres + gateway
+cp .env.example .env   # add your Anthropic API key
+make demo              # Postgres + gateway
 ```
 
 Open **http://localhost:8000/ui** — the split-screen demo: a naive LLM
@@ -174,12 +174,37 @@ trail underneath. Seven scripted demo queries are one click away.
 ### Local development
 
 ```bash
-docker compose up -d postgres   # Postgres only
-cp .env.example .env            # add your Anthropic API key
-uv sync                         # install dependencies (incl. dev)
-uv run uvicorn argo.main:app --reload
-uv run pytest                   # run the test suite
+cp .env.example .env   # add your Anthropic API key
+make install           # dependencies (incl. dev)
+make run               # Postgres + gateway with hot reload
+make help              # every target
 ```
+
+### Testing
+
+The suite runs with **no API key, no database, and no network** — every
+pluggable seam has a test double (`FakeLlmClient`, `InMemoryAuditWriter`,
+`SeedDerivedAdapter`, `SeedTransactionSource`), so the full gating pipeline
+is exercised offline.
+
+```bash
+make test      # offline suite; live-DB tests skip
+make ci        # lint + policy validation + tests, as CI runs them
+```
+
+Tests marked `db` exercise the production data path — `DbDerivedAdapter`,
+`argo/db/queries.py`, `PostgresAuditWriter` — and need a real Postgres:
+
+```bash
+make db-up
+make test-db
+```
+
+CI (`.github/workflows/ci.yml`) runs lint + policy validation, the offline
+suite on Python 3.11/3.12/3.13, the live-Postgres suite against a service
+container, and a Docker build with a compose health check.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) to start contributing.
 
 ## API
 
@@ -370,6 +395,8 @@ sequenceDiagram
 | [DEPLOYMENT.md](DEPLOYMENT.md) | When you're ready to run it past `docker-compose`. Every env var, Kubernetes shape, common errors. |
 | [ADAPTERS.md](ADAPTERS.md) | When the default Postgres / Anthropic / Postgres-audit stack isn't your stack. Worked Okta + Bedrock + Splunk examples. |
 | [POLICY.md](POLICY.md) | When you're authoring `banking.toml` for your bank. Full reference, validation errors, versioning advice. |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Before your first PR. Setup, workflow, what a good change looks like. |
+| [AGENTS.md](AGENTS.md) | Working in this repo — repo map, invariants, conventions. Written for coding agents; useful to humans too. |
 
 ## Project layout
 
@@ -377,11 +404,14 @@ sequenceDiagram
 argo/               # gateway package — FastAPI app + the six pipeline stages
 argo/db/            # Postgres access, schema, seed data, audit log
 argo/policy/        # GRC-reviewable policy file + loader
-argo/plugins.py     # plugin loader for the four pluggable Protocols
+argo/clock.py       # single reference instant for time-windowed rules
+argo/plugins.py     # plugin loader for the five pluggable Protocols
 static/             # demo UI (single-file vanilla HTML/CSS/JS)
-tests/              # pytest suite (entitlement policy + rewriter)
-scripts/            # eval + validation harnesses
+tests/              # pytest suite — offline by default, `db`-marked tests need Postgres
+scripts/            # eval + validation harnesses (call the live LLM)
 eval/               # labeled claim set + baseline characterization
+Makefile            # every dev command; `make help` to list them
+.github/workflows/  # CI: lint, tests on 3.11–3.13, live Postgres, Docker build
 docker-compose.yml  # Postgres + gateway
 Dockerfile          # gateway image
 ```
