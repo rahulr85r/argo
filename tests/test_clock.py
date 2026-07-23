@@ -18,7 +18,11 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from argo.clock import InvalidReferenceTimeError, reference_now
+from argo.clock import (
+    InvalidReferenceTimeError,
+    reference_now,
+    validate_reference_time,
+)
 from argo.config import settings
 from argo.db.seed import _TX_DATA, SEED_REFERENCE_TIME, _ts, seed_counterparty_set
 from argo.policy import POLICY
@@ -183,3 +187,41 @@ def test_wall_clock_would_have_decayed_the_demo(reference):
         "seed data now looks recent on wall clock — the drift has been fixed "
         "by regenerating the dataset rather than by pinning; revisit this test"
     )
+
+
+# ----- startup validation ------------------------------------------------
+#
+# `reference_now()` is only reached when a time-windowed rule is evaluated, so
+# without a startup check a typo lets the gateway boot healthy, pass health
+# checks, and only fail on the first request touching `recent_payment`.
+
+
+def test_validate_rejects_garbage_at_startup(reference):
+    """A bad REFERENCE_TIME must stop the process, not wait for a request."""
+    reference("not-a-timestamp")
+    with pytest.raises(InvalidReferenceTimeError):
+        validate_reference_time()
+
+
+def test_validate_accepts_the_three_valid_modes(reference):
+    for value in ("", "seed", "2026-05-24T00:00:00Z"):
+        reference(value)
+        validate_reference_time()  # must not raise
+
+
+def test_validate_warns_when_clock_is_pinned(reference, caplog):
+    """Pinning widens entitlements over time; it must not be silent."""
+    reference("seed")
+    with caplog.at_level("WARNING", logger="argo.clock"):
+        validate_reference_time()
+    assert any("REFERENCE_TIME" in r.getMessage() for r in caplog.records), (
+        "pinning the policy clock should emit a warning"
+    )
+
+
+def test_validate_is_silent_on_wall_clock(reference, caplog):
+    """The production default must not spam logs."""
+    reference("")
+    with caplog.at_level("WARNING", logger="argo.clock"):
+        validate_reference_time()
+    assert not caplog.records

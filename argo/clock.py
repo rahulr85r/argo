@@ -32,9 +32,12 @@ ageing out. `DEPLOYMENT.md` says so next to the variable.
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 
 from argo.config import settings
+
+logger = logging.getLogger(__name__)
 
 SEED_MODE = "seed"
 
@@ -78,4 +81,38 @@ def reference_now() -> datetime:
     return parsed.astimezone(UTC)
 
 
-__all__ = ["reference_now", "InvalidReferenceTimeError", "SEED_MODE"]
+def validate_reference_time() -> None:
+    """Fail fast at startup on a bad or production-unsafe `REFERENCE_TIME`.
+
+    `reference_now()` is only called when a time-windowed rule is evaluated, so
+    without this a typo would let the gateway boot healthy, pass health checks,
+    and only 500 on the first request that touches `recent_payment`. The policy
+    file is parsed at import time for exactly this reason; the clock gets the
+    same treatment.
+
+    Also warns when the clock is pinned. Pinning freezes the counterparty graph
+    so stale relationships stop ageing out, meaning entitlements only ever
+    widen — the failure class Argo exists to prevent. It is a demo/test
+    affordance, and a silent one is worse than a loud one.
+    """
+    raw = (settings.reference_time or "").strip()
+    if not raw:
+        return
+
+    reference = reference_now()  # raises InvalidReferenceTimeError on garbage
+    logger.warning(
+        "REFERENCE_TIME=%s pins the policy clock to %s. The counterparty graph "
+        "is frozen at that instant: stale relationships never age out and "
+        "entitlements only widen. Intended for the demo and tests — leave "
+        "REFERENCE_TIME empty in production.",
+        raw,
+        reference.isoformat(),
+    )
+
+
+__all__ = [
+    "reference_now",
+    "validate_reference_time",
+    "InvalidReferenceTimeError",
+    "SEED_MODE",
+]

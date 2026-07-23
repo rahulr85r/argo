@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
 
+from argo.clock import validate_reference_time
 from argo.db.audit import AuditEventRecord, get_recent_audit_events
 from argo.db.bootstrap import init_db
 from argo.entitlements import UnknownUserError
@@ -14,6 +15,9 @@ from argo.schemas import ChatRequest, ChatResponse, GateRequest
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Before anything else: a bad REFERENCE_TIME should stop the gateway here,
+    # not on the first request that evaluates a time-windowed rule.
+    validate_reference_time()
     init_db()
     yield
 
