@@ -22,7 +22,6 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-
 ClaimType = Literal[
     "balance",
     "account_existence",

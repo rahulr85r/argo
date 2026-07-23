@@ -173,6 +173,19 @@ If LiteLLM can't reach your provider the way you want it to, write a custom
 | Variable | Default | What it does |
 |---|---|---|
 | `POLICY_PATH` | `""` (bundled file) | Absolute path to your policy TOML. In production, mount your bank's policy file and point this at it. See [POLICY.md](POLICY.md). |
+| `REFERENCE_TIME` | `""` (wall clock) | Reference instant for time-windowed rules like `recent_payment`. **Leave empty in production.** `seed` pins to the bundled demo dataset; an ISO-8601 timestamp pins to that instant (useful for replaying a past entitlement decision during an audit). |
+
+> `REFERENCE_TIME` is validated at startup: a malformed value aborts the boot
+> rather than failing the first request that evaluates a time-windowed rule, and
+> a pinned clock logs a warning on every start. `.env.example` ships the line
+> commented out so a pin is never inherited by copying it to `.env`; the demo
+> gets its pin from `docker-compose.yml` instead.
+>
+> **Do not pin `REFERENCE_TIME` in production.** A pinned reference freezes
+> the counterparty graph: relationships that should age out of the
+> `recent_payment` window never do, so entitlements only ever widen. The
+> bundled demo pins to `seed` because its transactions are fixed dates that
+> would otherwise decay out of their own window — see [POLICY.md](POLICY.md).
 
 ### Plugin selection
 

@@ -13,6 +13,8 @@ at `your_module:YourClass`. See ADAPTERS.md for a worked example.
 from __future__ import annotations
 
 import time
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from typing import Protocol
 
 import litellm
@@ -110,6 +112,125 @@ class LiteLlmClient:
         raise last_exc
 
 
+# ----- FakeLlmClient: deterministic client for tests / offline dev ------
+
+
+class FakeLlmClient:
+    """A controllable `LlmClient` that never touches the network.
+
+    Ships in the production module on purpose: it is the reference
+    implementation of the `LlmClient` Protocol, so a bank writing its own
+    client has a minimal example to read, and Argo's own tests can exercise
+    every LLM-dependent stage (extractor, verifier, naive chat) with no API
+    key and no network.
+
+    Script it three ways — each accepted by both `chat=` and `judge=`:
+
+        FakeLlmClient(judge='{"claims": []}')             # same text every call
+        FakeLlmClient(judge=['{"claims": []}', '{...}'])  # queue, in call order
+        FakeLlmClient(judge=lambda system, user: "...")   # computed per call
+
+    A queue that runs dry raises `FakeLlmExhausted`, so a test that triggers
+    more LLM round-trips than it scripted fails loudly rather than silently
+    replaying the last response. Passing an `Exception` instance (or a
+    callable that raises) simulates a provider failure.
+
+    Every call is appended to `.calls` as a `FakeCall`, so tests can assert
+    on prompt contents and on how many round-trips a path actually made —
+    the verifier's "skip the LLM when nothing needs checking" optimisation
+    is only testable this way.
+
+    Constructs with zero arguments so it also works as a plugin spec:
+    `LLM_CLIENT=argo.llm:FakeLlmClient` gives a gateway that boots and
+    answers without an LLM provider (useful for wiring-only smoke tests).
+    """
+
+    def __init__(
+        self,
+        chat: _Script | None = None,
+        judge: _Script | None = None,
+        *,
+        latency_ms: int = 0,
+    ) -> None:
+        self._chat = _normalize_script(chat if chat is not None else _DEFAULT_CHAT, "chat")
+        self._judge = _normalize_script(judge if judge is not None else _DEFAULT_JUDGE, "judge")
+        self._latency_ms = latency_ms
+        self.calls: list[FakeCall] = []
+
+    def chat(self, system: str, user: str, *, max_tokens: int = 1024) -> tuple[str, int]:
+        return self._record("chat", self._chat, system, user, max_tokens)
+
+    def judge(self, system: str, user: str, *, max_tokens: int = 2048) -> tuple[str, int]:
+        return self._record("judge", self._judge, system, user, max_tokens)
+
+    def _record(
+        self, kind: str, script: _ScriptFn, system: str, user: str, max_tokens: int
+    ) -> tuple[str, int]:
+        self.calls.append(FakeCall(kind=kind, system=system, user=user, max_tokens=max_tokens))
+        return script(system, user), self._latency_ms
+
+    # Convenience accessors for assertions.
+
+    def calls_of(self, kind: str) -> list[FakeCall]:
+        return [c for c in self.calls if c.kind == kind]
+
+
+@dataclass(frozen=True)
+class FakeCall:
+    """One recorded call against a `FakeLlmClient`."""
+
+    kind: str  # "chat" | "judge"
+    system: str
+    user: str
+    max_tokens: int
+
+
+class FakeLlmExhausted(RuntimeError):
+    """A scripted response queue ran out before the code stopped calling."""
+
+
+_ScriptFn = Callable[[str, str], str]
+_Script = str | Exception | Sequence[str | Exception] | _ScriptFn
+
+_DEFAULT_CHAT = "This is a fake chat response."
+_DEFAULT_JUDGE = '{"claims": []}'
+
+
+def _normalize_script(script: _Script, label: str) -> _ScriptFn:
+    """Collapse the three scripting forms into one callable."""
+    if callable(script):
+        return script
+
+    if isinstance(script, (str, Exception)):
+        item = script
+
+        def constant(_system: str, _user: str) -> str:
+            return _unwrap(item)
+
+        return constant
+
+    queue = list(script)
+    remaining = iter(queue)
+
+    def from_queue(_system: str, _user: str) -> str:
+        try:
+            return _unwrap(next(remaining))
+        except StopIteration:
+            raise FakeLlmExhausted(
+                f"FakeLlmClient.{label} was called more times than scripted "
+                f"({len(queue)} response(s) provided). Either the code under test "
+                f"made an unexpected extra LLM round-trip, or the script is short."
+            ) from None
+
+    return from_queue
+
+
+def _unwrap(item: str | Exception) -> str:
+    if isinstance(item, Exception):
+        raise item
+    return item
+
+
 # ----- Module-level singleton + backwards-compatible function shims -----
 
 
@@ -131,6 +252,9 @@ def call_judge_model(system: str, user: str, *, max_tokens: int = 2048) -> tuple
 __all__ = [
     "LlmClient",
     "LiteLlmClient",
+    "FakeLlmClient",
+    "FakeCall",
+    "FakeLlmExhausted",
     "call_chat_model",
     "call_judge_model",
 ]

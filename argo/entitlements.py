@@ -43,9 +43,12 @@ from argo.policy import POLICY, CounterpartyRule
 
 class ClaimVerdict(StrEnum):
     ALLOW = "ALLOW"
-    BLOCK = "BLOCK"                       # entitlement-denied
-    REDACT = "REDACT"                     # source-span verifier rejected the claim (hallucination / misattribution)
-    NEEDS_SOURCE_CHECK = "NEEDS_SOURCE_CHECK"  # interim verdict from check_claim() — verifier resolves to ALLOW or REDACT
+    # entitlement-denied
+    BLOCK = "BLOCK"
+    # source-span verifier rejected the claim (hallucination / misattribution)
+    REDACT = "REDACT"
+    # interim verdict from check_claim() — verifier resolves it to ALLOW or REDACT
+    NEEDS_SOURCE_CHECK = "NEEDS_SOURCE_CHECK"
 
 
 @dataclass(frozen=True)

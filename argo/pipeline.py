@@ -25,8 +25,8 @@ import time
 from pydantic import BaseModel, Field
 
 from argo.claims import Claim
-from argo.db.audit import AuditEvent, AuditedClaim, write_audit_event
 from argo.config import settings
+from argo.db.audit import AuditedClaim, AuditEvent, write_audit_event
 from argo.entitlements import (
     ClaimVerdict,
     EntitlementAdapter,
@@ -39,7 +39,6 @@ from argo.naive import naive_chat
 from argo.plugins import load_plugin
 from argo.rewriter import REFUSAL_TEXT, rewrite_response
 from argo.verifier import resolve_verdicts
-
 
 # ----- API response shapes -----------------------------------------------
 

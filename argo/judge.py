@@ -22,7 +22,6 @@ from argo.claims import ExtractedClaims
 from argo.db.queries import get_all_accounts_with_owners, get_all_users
 from argo.llm import call_judge_model
 
-
 # ----- Prompt construction -----------------------------------------------
 
 

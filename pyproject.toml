@@ -39,6 +39,22 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM"]
 
+[tool.ruff.lint.per-file-ignores]
+# Long lines are inherent to these files, not a style lapse:
+#   seed.py  — fixed-width demo data tables; wrapping them destroys the grid
+#   judge.py / verifier.py — verbatim few-shot prompt text, where a line break
+#     would change what the model is actually sent
+"argo/db/seed.py" = ["E501"]
+"argo/judge.py" = ["E501"]
+"argo/verifier.py" = ["E501"]
+"argo/naive.py" = ["E501"]
+# Eval harnesses: aligned expectation tables and wide report lines, where
+# wrapping costs more readability than it buys.
+"scripts/*" = ["E501"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "db: requires a live Postgres (set TEST_DATABASE_URL); skipped otherwise",
+]

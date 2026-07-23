@@ -18,7 +18,6 @@ from dataclasses import dataclass
 from argo.claims import Claim
 from argo.entitlements import ClaimVerdict, VerdictResult
 
-
 REDACTION_MARKER = "[redacted]"
 
 # Generic refusal used when too much of a response is disallowed. The demo's

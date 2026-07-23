@@ -108,12 +108,28 @@ user becomes a counterparty if they match at least one rule.
 
 Anyone who appeared as `counterparty_user_id` on any tx posted to one of
 the asking user's accounts within the last `lookback_days` days becomes
-a counterparty. The "now" reference is the database's `NOW()` (production)
-or the seed's pinned reference date (tests).
+a counterparty.
 
 Stale relationships drop off automatically. A user A who paid user J
 $75 four years ago no longer has visibility into J today, even though
 the tx is still in the history table.
+
+The window is `[reference − lookback_days, reference]`, closed at both
+ends, and the reference comes from `argo/clock.py` — a single clock shared
+by the Postgres and in-memory evaluators, so both answer this question
+identically. `REFERENCE_TIME` selects it:
+
+| Value | Reference | Use |
+|---|---|---|
+| unset / empty | wall clock (UTC) | **production** |
+| `seed` | one day past the newest seeded tx | the bundled demo + tests |
+| ISO-8601 timestamp | that instant | replaying a past decision for audit |
+
+Pinning freezes the counterparty graph, so stale relationships stop ageing
+out — a demo and test affordance, never a production posture. The bundled
+demo pins to `seed` because its transactions are fixed dates in Feb–May
+2026; on wall clock they would slide out of the 90-day window and the
+demo's counterparty graph would silently collapse to joint co-owners.
 
 ##### `joint_account_co_owner`
 

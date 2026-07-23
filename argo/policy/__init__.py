@@ -17,7 +17,6 @@ from typing import get_args
 
 from argo.claims import ClaimType
 
-
 _VALID_CLAIM_TYPES = frozenset(get_args(ClaimType))
 _VALID_RULE_TYPES = frozenset({"recent_payment", "joint_account_co_owner"})
 

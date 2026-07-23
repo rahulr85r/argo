@@ -21,13 +21,13 @@ Idempotent: only inserts if the users table is empty.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from argo.db import get_conn
 
 
 def _ts(iso: str) -> datetime:
-    return datetime.fromisoformat(iso).replace(tzinfo=timezone.utc)
+    return datetime.fromisoformat(iso).replace(tzinfo=UTC)
 
 
 # ----- Users --------------------------------------------------------------
@@ -426,18 +426,28 @@ _TX_DATA = sorted(_build_transactions(), key=lambda r: (r[6], r[0]))
 # ----- Policy-rule evaluators against the in-memory seed -----------------
 #
 # The SeedDerivedAdapter (test-only) applies the same POLICY rules as
-# production, but against the lists above instead of Postgres. The
-# reference "now" is pinned to one day past the latest tx in the seed so
-# rule evaluation is independent of wall-clock — tests run in 2026 or
-# 2030 see the same counterparty graph.
+# production, but against the lists above instead of Postgres.
+#
+# Both evaluators — this one and the SQL in argo/db/queries.py — anchor
+# their time window to argo.clock.reference_now(). Set REFERENCE_TIME=seed
+# and the two agree exactly; leave it unset and both follow wall clock.
+# They can no longer disagree, which is what let the demo dataset decay
+# out of its own 90-day window unnoticed.
 
 
 def _seed_reference_now() -> datetime:
+    """One day past the newest seeded transaction.
+
+    Pure function of the data above — no clock involved — so importing this
+    module never depends on configuration. `argo.clock` reads it when
+    REFERENCE_TIME=seed, and it follows automatically if the seed changes.
+    """
     latest = max(_ts(ts) for (_a, _c, _d, _cpn, _cpu, _m, ts) in _TX_DATA)
     return latest + timedelta(days=1)
 
 
-_SEED_NOW: datetime = _seed_reference_now()
+#: Public: the instant REFERENCE_TIME=seed resolves to. See argo/clock.py.
+SEED_REFERENCE_TIME: datetime = _seed_reference_now()
 
 
 def accounts_for(user_id: str) -> set[str]:
@@ -445,7 +455,12 @@ def accounts_for(user_id: str) -> set[str]:
 
 
 def _seed_recent_payment(user_id: str, lookback_days: int) -> set[str]:
-    cutoff = _SEED_NOW - timedelta(days=lookback_days)
+    from argo.clock import reference_now
+
+    # Closed at both ends, matching the SQL in argo/db/queries.py — see the
+    # note there on why the upper bound matters for a pinned reference.
+    reference = reference_now()
+    cutoff = reference - timedelta(days=lookback_days)
     owned = accounts_for(user_id)
     return {
         cp_user
@@ -453,7 +468,7 @@ def _seed_recent_payment(user_id: str, lookback_days: int) -> set[str]:
         if acct in owned
         and cp_user is not None
         and cp_user != user_id
-        and _ts(ts) >= cutoff
+        and cutoff <= _ts(ts) <= reference
     }
 
 
@@ -480,6 +495,56 @@ def seed_counterparty_set(user_id: str) -> set[str]:
             raise ValueError(f"unhandled rule type in seed evaluator: {rule.type}")
     cps.discard(user_id)
     return cps
+
+
+# ----- In-memory TransactionSource for tests / dev REPL -----------------
+
+
+def _seed_tx_rows() -> list[dict]:
+    """Every seeded transaction as a `TransactionSource` row dict.
+
+    Ids match what `seed_if_empty()` assigns in Postgres (`tx_0001`, …),
+    so a claim verified against the seed source cites the same tx id it
+    would cite against the database.
+    """
+    display = {a["id"]: a["display_name"] for a in ACCOUNTS}
+    return [
+        {
+            "id": f"tx_{i:04d}",
+            "account_id": acct,
+            "account_display": display.get(acct, acct),
+            "amount_cents": cents,
+            "direction": direction,
+            "counterparty_name": cp_name,
+            "counterparty_user_id": cp_user,
+            "memo": memo,
+            "ts": _ts(ts),
+        }
+        for i, (acct, cents, direction, cp_name, cp_user, memo, ts)
+        in enumerate(_TX_DATA, start=1)
+    ]
+
+
+class SeedTransactionSource:
+    """In-memory `TransactionSource` over the seed data. Test/dev only.
+
+    The counterpart to `SeedDerivedAdapter`: lets the source-span verifier
+    run its full matching logic — including the batched judge prompt — with
+    no Postgres. Row shape and ordering (ts ascending, then id) mirror
+    `PostgresTransactionSource` so the verifier cannot tell them apart.
+
+    Like `SeedDerivedAdapter`, importing this outside `tests/` or a REPL is
+    almost certainly a mistake; production wires the Postgres source.
+    """
+
+    def __init__(self) -> None:
+        self._rows = _seed_tx_rows()
+
+    def get_user_transactions(self, user_id: str) -> list[dict]:
+        owned = accounts_for(user_id)
+        rows = [r for r in self._rows if r["account_id"] in owned]
+        rows.sort(key=lambda r: (r["ts"], r["id"]))
+        return rows
 
 
 # ----- Insert into Postgres ---------------------------------------------

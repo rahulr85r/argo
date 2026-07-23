@@ -18,7 +18,6 @@ from argo.entitlements import (
 )
 from argo.rewriter import REDACTION_MARKER, REFUSAL_TEXT, rewrite_response
 
-
 LABELED = {
     ex["id"]: ex
     for ex in json.loads(

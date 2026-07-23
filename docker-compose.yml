@@ -28,6 +28,10 @@ services:
       POSTGRES_DB: argo
       POSTGRES_USER: argo
       POSTGRES_PASSWORD: argo
+      # Pin the counterparty-rule clock to the bundled dataset so the demo's
+      # fixed Feb–May 2026 transactions never age out of the 90-day window.
+      # Real deployments leave this empty — see .env.example.
+      REFERENCE_TIME: ${REFERENCE_TIME:-seed}
       # Models (overridable via .env).
       CHAT_MODEL: ${CHAT_MODEL:-anthropic/claude-haiku-4-5}
       JUDGE_MODEL: ${JUDGE_MODEL:-anthropic/claude-haiku-4-5}
